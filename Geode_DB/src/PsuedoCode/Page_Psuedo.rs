@@ -11,7 +11,7 @@
     free space  <--|[slot][slot][slot]
     [ meta data ][ freespace pointer ]
 
-    I dont know what the data will be since I'm in the design process :)
+    I dont know what the meta data will be since I'm in the design process :)
         PageID
         Page Size
         Size of freespace
@@ -21,7 +21,8 @@
     A system must be implemented to minimize the non-usage of fragmented space within a Page.
     Linearly scaning the offsets stores in within the slots is an idea that can be used.However, a table level free list
     might be a possible implementation strategy. For the creation of a MVP we will use the linear scan.
-    The size of fragment space and pointers to the start of fragmented space would be useful.
+    The size of fragment space and pointers to the start of fragmented space would be useful.However it isnt
+    feasible due to how oftern splits and merges can occur within the b-tree page
 
 
     enum Data Pages(){

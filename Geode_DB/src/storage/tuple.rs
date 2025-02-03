@@ -203,13 +203,10 @@ impl Tuple {
 
         // Add number of varlen fields
         let data = num_varlen_fields as u8;
-        println!("b{:?}", header);
         header.push(data);
-        println!("a{:?}", header);
 
         // Data pointers
         for ptr in data_ptrs {
-            println!("Pointer {}", ptr);
             header.extend(ptr.to_le_bytes());
         }
     }
