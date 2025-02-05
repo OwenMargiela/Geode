@@ -1,134 +1,131 @@
 use std::{
+    env::consts,
+    ops::Index,
     ptr::copy,
     sync::atomic::{AtomicBool, AtomicI32},
 };
 
+/*
+    To prevent me from ripping my hair off my head, i'll  recreate this page implementation from scratch.
+    I am now aware of the things i need to do on a technical bases to implement the mechanism
+
+    Problems with the current slotted page
+
+    Constants are hard to read
+    Didn't test in-place edits of data within the byte stream
+    Data isn't compartmentalized enough
+    incorrent logic for insertions
+
+    Formalize everything, try again.
+
+*/
+
 use page_constants::{
-    FREESPACE_POINTER, FREESPACE_SIZE, FREESPACE_SIZE_SIZE, PAGE_ID, PAGE_SIZE, SLOT_POINTER,
-    SLOT_POINTER_SIZE, SLOT_SIZE, STARTING_SLOT_OFFSET,
+    BYTE_LENGTH_2, FREESPACE_POINTER, FREESPACE_SIZE, METADATA_SIZE, METADATA_STARTING_OFFSET,
+    NUMBER_OF_SLOTS, PAGE_ID, PAGE_SIZE, STARTING_SLOT_OFFSET,
 };
 
 use super::tuple::Tuple;
+
+pub struct Page {
+    data: [u8; PAGE_SIZE],
+    _pin_count: AtomicI32,
+    _is_dirty: AtomicBool,
+}
 pub mod page_constants {
-    // Offset
-    pub const PAGE_SIZE: usize = 4096;
-    pub const FREESPACE_POINTER: usize = PAGE_SIZE - 6;
-    pub const PAGE_ID: usize = PAGE_SIZE - 5;
-    pub const FREESPACE_SIZE: usize = PAGE_SIZE - 4;
+    // Offsets
+    pub const METADATA_STARTING_OFFSET: usize = PAGE_SIZE - METADATA_SIZE;
+    // Offsets within the metadata sub array
+    pub const FREESPACE_POINTER: usize = 0;
+    pub const PAGE_ID: usize = 2;
+    pub const FREESPACE_SIZE: usize = 4;
+    pub const NUMBER_OF_SLOTS: usize = 6;
 
-    // The value contained at this index is the amount of bytes away
-    // from the free slot at that particular index
-    pub const SLOT_POINTER: usize = PAGE_SIZE - 2;
-
-    // A pointer that remains fixed to the start of the slot array
-    pub const STARTING_SLOT_OFFSET: usize = PAGE_SIZE - 7;
+    pub const STARTING_SLOT_OFFSET: usize = METADATA_STARTING_OFFSET - 1;
 
     // Size
-    pub const FREESPACE_SIZE_SIZE: usize = 2;
-    // Pointer to the next free slot
-    pub const SLOT_POINTER_SIZE: usize = 2;
+    pub const PAGE_SIZE: usize = 1024 * 4;
+    // Stores an element with a byte length of two
+    pub const BYTE_LENGTH_2: usize = 2;
+    // The metadata sub array contains 4 elements of size BYTE_LENGTH_2
+    pub const METADATA_SIZE: usize = 8;
+}
 
-    // Actual slot
-    pub const SLOT_SIZE: usize = 2;
+pub enum METADATA {
+    _FreespacePointer,
+    _PageId,
+    _FreespaceSize,
+    _NumberOfSlots,
 }
 
 // make internal interfaces
 pub trait SlottedPage {
-    fn new(prev_page: Option<u8>) -> Page;
+    // Param Prev Page ID
+    fn new(prev_page: Option<u16>) -> Page;
     fn append(&mut self, tuple: Tuple) -> Option<usize>;
-    fn next_pg_id(&self) -> u8;
+    // fn next_pg_id(&self) -> u8;
 
-    // Getters
-    fn get_ptr_to_freespace(&self) -> usize;
-    fn get_page_id(&self) -> u8;
-    fn get_freespace_size(&self) -> u16;
-    fn get_slot_ptr(&self) -> u16;
-    fn get_slot_position(&self) -> usize;
+    // // Will be implement after page b-tree has been put in place
+    // // fn insert(tuple: Tuple, offset: usize) -> Option<usize>;
 
-    // Setters
-    fn _set_ptr_to_freespace(&mut self, value: usize);
-    fn _set_freespace_size(&mut self, value: u16);
-    fn _set_page_id(&mut self, value: u8);
-    fn set_slot_ptr(&mut self, value: u16);
+    // // fn deletion_marker(slot_entry: usize) -> usize;
+    // // fn deletion_apply(slot_entry: usize) -> usize;
+    // // // Un-deletions your marker :)
+    // // fn rollback_delete(slot_entry: usize) -> usize;
 
-    // No function below here should be user callable
-
-    // We assume that this will not be used to compute the insertion
-    // of tuples into fragmented space as the size of the fragmented space
-    // with me known before insertion
-
-    // Will be used for append only operations
-    // If the data surpasses the FREESPACE_SIZE threshold,
-    // it cannot be inserted
-    fn insertion_offset(&self, tuple_len: usize) -> Option<usize>;
-    fn push_slot(&mut self, tuple_offset: usize) -> usize;
-    fn del_slot(&mut self, index: usize) -> usize;
-
-    // Will be implement after page b-tree has been put in place
-    // fn insert(tuple: Tuple, offset: usize) -> Option<usize>;
-
-    // fn deletion_marker(slot_entry: usize) -> usize;
-    // fn deletion_apply(slot_entry: usize) -> usize;
-    // // Un-deletions your marker :)
-    // fn rollback_delete(slot_entry: usize) -> usize;
-    // writes data, any data you want baby
+    // // writes data, any data you want baby
     fn write_data(&mut self, src: Vec<u8>, len: usize, starting_position: usize) -> usize;
 
-    // fn update_tuple(slot_entry: usize) -> usize;
     // fn get_tuple(slot_entry: usize) -> usize;
+
+    fn get_metadata(&self, metadata: METADATA) -> u16;
+    fn update_freespace_values(&mut self, data_length: u16) -> Result<(), i8>;
+
+    fn get_slot_at_index(&self, index: u16) -> Result<&[u8], i8>;
+    fn slot_append(&mut self, tuple_offset_len: [u8; 2]);
+    fn slot_remove_marker(&mut self, index: u16) -> Result<(), i8>;
+
+    fn print_slot(&self);
+    fn print_metadata(&self);
 }
 
 impl SlottedPage for Page {
-    // Make ID larger possibly u32 or 64
-    fn new(prev_page: Option<u8>) -> Page {
-        /*
-           freespace pointer   1
-           PageID              2
-           Size of freespace   3
-           Prev PageID         4
-           Slot Pointer        5
-           Footer of length:   6
-        */
-
-        let mut page_data: Vec<u8> = vec![0; PAGE_SIZE];
-
-        // Setting Meta Data
-        let mut meta_data: Vec<u8> = Vec::new();
+    fn new(prev_page: Option<u16>) -> Page {
+        let mut page_data: [u8; PAGE_SIZE] = [0; PAGE_SIZE];
 
         // freespace pointer the offset of the start of non segmented freespace
-        let free_space_ptr = (0 as u8).to_le_bytes();
-        meta_data.extend(&free_space_ptr);
+        let free_space_ptr: [u8; BYTE_LENGTH_2];
+        free_space_ptr = u16::MIN.to_le_bytes();
 
-        // PageID Might need to be u64 in the production case
-        let page_id: [u8; 1];
+        // _PageID Might need to be u64 in the production case
+        let page_id: [u8; BYTE_LENGTH_2];
 
-        if prev_page.is_none() {
-            page_id = (1 as u8).to_le_bytes();
-        } else {
-            let mut prev_value = prev_page.unwrap();
+        page_id = prev_page.map_or((1 as u16).to_le_bytes(), |mut prev_value| {
             prev_value += 1;
-            page_id = prev_value.to_le_bytes();
-        }
-
-        meta_data.extend(&page_id);
+            prev_value.to_le_bytes()
+        });
 
         // Freespace Size
-        let free_pace_size = (PAGE_SIZE as u16).to_le_bytes();
-        meta_data.extend(&free_pace_size);
+        let free_pace_size: [u8; BYTE_LENGTH_2];
+        free_pace_size = ((PAGE_SIZE - METADATA_SIZE) as u16).to_le_bytes();
 
-        // Slot Pointer ( Points to where the next slot will be placed)
-        let slot_pointer = (meta_data.len() as u16 + 1).to_le_bytes();
-        meta_data.extend(&slot_pointer);
+        // Number of slots
+        let number_of_slots: [u8; BYTE_LENGTH_2];
+        number_of_slots = u16::MIN.to_le_bytes();
 
-        let meta_data_len = meta_data.len();
-        let meta_data_offset = PAGE_SIZE - meta_data_len;
+        // Setting Meta Data
+        let mut meta_data: Vec<u8> = Vec::with_capacity(METADATA_SIZE);
+        meta_data.extend(free_space_ptr);
+        meta_data.extend(page_id);
+        meta_data.extend(free_pace_size);
+        meta_data.extend(number_of_slots);
 
         // Memory Moving meta data to a specific offset within the data array
         unsafe {
             copy(
                 meta_data.as_ptr(),
-                page_data.as_mut_ptr().add(meta_data_offset),
-                meta_data_len,
+                page_data.as_mut_ptr().add(METADATA_STARTING_OFFSET),
+                METADATA_SIZE,
             );
         }
 
@@ -140,76 +137,22 @@ impl SlottedPage for Page {
     }
 
     fn append(&mut self, tuple: Tuple) -> Option<usize> {
-        // The get slot position is just the postion in the slot arra
-        // NOT THE FREESPACE POSITION
-        let ptr_to_freespace = self.get_ptr_to_freespace();
-        let tuple_data_length = tuple.data.len();
+        let tuple_len = tuple.data.len() as u16;
+        let freespace_pointer = self.get_metadata(METADATA::_FreespacePointer);
 
-        // println!("Pointer to free space {:?}", ptr_to_freespace);
-        self.push_slot(ptr_to_freespace);
-        let tuple_len = tuple.data.len();
+        if self.update_freespace_values(tuple_len).is_ok() {
+            let tuple_len_bytes = tuple_len.to_le_bytes();
+            self.write_data(tuple.data, tuple_len as usize, freespace_pointer as usize);
 
-        if self.insertion_offset(tuple_len).is_some() {
-            self.write_data(tuple.data, tuple_len, ptr_to_freespace);
-            self._set_ptr_to_freespace(tuple_data_length + ptr_to_freespace);
-            return Some(tuple_len);
+            self.slot_append(tuple_len_bytes);
+
+            return Some((tuple_len + freespace_pointer) as usize);
         } else {
             // Not enough space to append the tuple
-            None
+            return None;
         }
     }
 
-    fn insertion_offset(&self, tuple_len: usize) -> Option<usize> {
-        let mut insertion_offset = self.get_ptr_to_freespace();
-        insertion_offset += tuple_len;
-
-        if insertion_offset > self.get_freespace_size() as usize {
-            None
-        } else {
-            Some(0)
-        }
-    }
-
-    // Is the write function overkill for the slots?
-    fn push_slot(&mut self, tuple_offset: usize) -> usize {
-        let slot_position = self.get_slot_ptr();
-        let slot_offset = slot_position as usize + SLOT_SIZE + 1;
-
-        println!("Tuple offset {:?}", (tuple_offset as u16).to_le_bytes());
-
-        println!(
-            "Position {:?}",
-            // The + 1 to account for the offset
-            PAGE_SIZE - slot_offset
-        );
-
-        // the minus 1 to account for the length of the slot
-        // let slot_offset = PAGE_SIZE - ( slot_position as usize + 2 );
-
-        self.data[PAGE_SIZE - slot_offset..PAGE_SIZE - slot_offset + SLOT_SIZE]
-            .copy_from_slice(&(tuple_offset as u16).to_le_bytes());
-
-        // println!("Slot position {} - {} ", PAGE_SIZE - slot_offset,  PAGE_SIZE - slot_offset + 1);
-
-        self.set_slot_ptr(self.get_slot_ptr() + 2);
-
-        tuple_offset
-    }
-
-    fn del_slot(&mut self, index: usize) -> usize {
-        // jumps to the start of the slot arrays then from there,
-        // the exact position of the index
-        let position = STARTING_SLOT_OFFSET - index;
-        let slot_value = self.data[position];
-
-        if slot_value != 0 {
-            let slot_value = (0 as u8).to_le_bytes().to_vec();
-
-            self.write_data(slot_value, 1, position);
-        }
-
-        index
-    }
     // Wrapper around a memove
     fn write_data(&mut self, src: Vec<u8>, len: usize, starting_position: usize) -> usize {
         unsafe {
@@ -222,63 +165,145 @@ impl SlottedPage for Page {
         starting_position + len
     }
 
-    // Getters
-    fn get_ptr_to_freespace(&self) -> usize {
-        let ptr = self.data[FREESPACE_POINTER];
-        let usize_ptr = ptr as usize;
-        usize_ptr
+    fn print_metadata(&self) {
+        let metadata_subarray = &self.data[METADATA_STARTING_OFFSET..];
+        println!("{:?}", metadata_subarray);
     }
 
-    fn get_freespace_size(&self) -> u16 {
-        let ptr = &self.data[FREESPACE_SIZE..FREESPACE_SIZE + FREESPACE_SIZE_SIZE];
-        let u16_ptr = u16::from_le_bytes([ptr[0], ptr[1]]);
-        u16_ptr
+    fn get_metadata(&self, metadata: METADATA) -> u16 {
+        let metadata_subarray = &self.data[METADATA_STARTING_OFFSET..];
+
+        fn extract_u16(slice: &[u8], start: usize) -> u16 {
+            let end = start + BYTE_LENGTH_2;
+            u16::from_le_bytes(slice[start..end].try_into().expect("Slice length mismatch"))
+        }
+
+        match metadata {
+            METADATA::_FreespacePointer => extract_u16(metadata_subarray, FREESPACE_POINTER),
+            METADATA::_PageId => extract_u16(metadata_subarray, PAGE_ID),
+            METADATA::_FreespaceSize => extract_u16(metadata_subarray, FREESPACE_SIZE),
+            METADATA::_NumberOfSlots => extract_u16(metadata_subarray, NUMBER_OF_SLOTS),
+        }
     }
 
-    fn get_page_id(&self) -> u8 {
-        let ptr = self.data[PAGE_ID];
-        ptr
+    fn update_freespace_values(&mut self, data_length: u16) -> Result<(), i8> {
+        fn write_u16(metadata_subarray: *mut u8, start: usize, data: [u8; 2]) {
+            unsafe {
+                copy(data.as_ptr(), metadata_subarray.add(start), BYTE_LENGTH_2);
+            }
+        }
+
+        let number_of_slots = self.get_metadata(METADATA::_NumberOfSlots);
+        let freespace_offset = self.get_metadata(METADATA::_FreespacePointer);
+        let mut freespace_size = self.get_metadata(METADATA::_FreespaceSize);
+
+        // BYTE_LENGTH_2 to account for the slot to be inserted
+        let frspc_offset = freespace_offset + (data_length + BYTE_LENGTH_2 as u16);
+        if freespace_size < data_length {
+            return Err(-1);
+        }
+        freespace_size -= data_length;
+
+        let metadata_subarray = &mut self.data[METADATA_STARTING_OFFSET..];
+
+        if frspc_offset as usize
+            >= PAGE_SIZE - METADATA_SIZE - (number_of_slots as usize * BYTE_LENGTH_2)
+        {
+            println!("insufficient size");
+            return Err(-1);
+        }
+
+        let frspc_ofst_bytes = (frspc_offset - BYTE_LENGTH_2 as u16).to_le_bytes();
+        let frspc_sz_bytes = (freespace_size).to_le_bytes();
+        let num_of_slots = (number_of_slots + 1 as u16).to_le_bytes();
+
+        // Write Freespace_offset
+        write_u16(
+            metadata_subarray.as_mut_ptr(),
+            FREESPACE_POINTER,
+            frspc_ofst_bytes,
+        );
+
+        // Write Freespace_size
+        write_u16(
+            metadata_subarray.as_mut_ptr(),
+            FREESPACE_SIZE,
+            frspc_sz_bytes,
+        );
+
+        // Write Number of slots
+        write_u16(
+            metadata_subarray.as_mut_ptr(),
+            NUMBER_OF_SLOTS,
+            num_of_slots,
+        );
+
+        Ok(())
+
     }
 
-    fn get_slot_ptr(&self) -> u16 {
-        let ptr = &self.data[SLOT_POINTER..SLOT_POINTER + SLOT_POINTER_SIZE];
-        let u16_ptr = u16::from_le_bytes([ptr[0], ptr[1]]);
-        u16_ptr
+    fn print_slot(&self) {
+        let number_of_slots = self.get_metadata(METADATA::_NumberOfSlots);
+
+        let slot_start = STARTING_SLOT_OFFSET - (number_of_slots as usize * BYTE_LENGTH_2);
+        let slot_range = slot_start + number_of_slots as usize * BYTE_LENGTH_2;
+
+        let slots = &self.data[slot_start..slot_range];
+
+        {
+            let mut slots = slots.to_vec();
+            slots.reverse();
+            println!("{:?}", slots);
+            println!("Length of {:?}", slots.len() / 2);
+        }
     }
 
-    fn get_slot_position(&self) -> usize {
-        let ptr = self.get_slot_ptr() as usize;
-        let pos = self.data[PAGE_SIZE - ptr] as usize;
-        pos
+    fn get_slot_at_index(&self, index: u16) -> Result<&[u8], i8> {
+        let index = index as usize;
+
+        let number_of_slots = self.get_metadata(METADATA::_NumberOfSlots);
+        if index > number_of_slots as usize {
+            return Err(-1);
+        }
+
+        let slot_start = STARTING_SLOT_OFFSET - (number_of_slots as usize * BYTE_LENGTH_2);
+        let slot_range = slot_start + number_of_slots as usize * BYTE_LENGTH_2;
+
+        let slots = &self.data[slot_start..slot_range];
+
+        let start = slots.len() - (index + 1) * BYTE_LENGTH_2;
+        let range = start + BYTE_LENGTH_2;
+
+        let data: &[u8] = &slots[start..range];
+
+        Ok(data)
+    }
+    fn slot_append(&mut self, tuple_offset_len: [u8; 2]) {
+        // Slot insertion index
+        let number_of_slots = self.get_metadata(METADATA::_NumberOfSlots);
+        let slot = STARTING_SLOT_OFFSET - (1 * BYTE_LENGTH_2) * number_of_slots as usize;
+        self.data[slot..slot + BYTE_LENGTH_2].copy_from_slice(&tuple_offset_len[0..2]);
     }
 
-    fn next_pg_id(&self) -> u8 {
-        self.get_page_id() + 1
-    }
+    fn slot_remove_marker(&mut self, index: u16) -> Result<(), i8> {
+        let index = index as usize;
 
-    // Setters
-    fn _set_ptr_to_freespace(&mut self, value: usize) {
-        self.data[FREESPACE_POINTER] = value as u8;
-    }
+        let number_of_slots = self.get_metadata(METADATA::_NumberOfSlots);
+        if index > number_of_slots as usize {
+            return Err(-1);
+        }
 
-    fn _set_freespace_size(&mut self, value: u16) {
-        let bytes = value.to_le_bytes();
-        self.data[FREESPACE_SIZE..FREESPACE_SIZE + FREESPACE_SIZE_SIZE].copy_from_slice(&bytes);
-    }
+        let slot_start = STARTING_SLOT_OFFSET - (number_of_slots as usize * BYTE_LENGTH_2);
+        let slot_range = slot_start + number_of_slots as usize * BYTE_LENGTH_2;
 
-    fn _set_page_id(&mut self, value: u8) {
-        self.data[PAGE_ID] = value;
-    }
+        let slots = &mut self.data[slot_start..slot_range];
 
-    fn set_slot_ptr(&mut self, value: u16) {
-        let bytes = value.to_le_bytes();
-        self.data[SLOT_POINTER..SLOT_POINTER + SLOT_POINTER_SIZE].copy_from_slice(&bytes);
+        let start = slots.len() - (index + 1) * BYTE_LENGTH_2;
+        let range = start + BYTE_LENGTH_2;
+
+        slots[start..range].copy_from_slice(&[0, 0]);
+        Ok(())
     }
-}
-pub struct Page {
-    data: Vec<u8>,
-    _pin_count: AtomicI32,
-    _is_dirty: AtomicBool,
 }
 
 #[cfg(test)]
@@ -286,34 +311,85 @@ mod tests {
     use crate::{
         catalog::schema::SchemaBuilder,
         db_types::container::{ByteBox, SchemaDataValue},
-        storage::tuple::{extract_byte_box_data, schema_reorder, Tuple},
+        storage::{
+            page::{
+                page_constants::{METADATA_SIZE, PAGE_SIZE},
+                METADATA,
+            },
+            tuple::{extract_byte_box_data, schema_reorder, Tuple},
+        },
     };
 
     use super::{Page, SlottedPage};
 
     #[test]
     fn new_page() {
-        let prev: Option<u8> = None;
+        let prev: Option<u16> = None;
         let mut page: Page = <Page as SlottedPage>::new(prev);
 
-        // print!("{:?}", &page.data);
+        assert_eq!(page.get_metadata(METADATA::_FreespacePointer), 0);
+        assert_eq!(page.get_metadata(METADATA::_PageId), 1);
 
-        assert_eq!(page.get_ptr_to_freespace(), 0);
-        assert_eq!(page.get_page_id(), 1);
-        assert_eq!(page.next_pg_id(), 2);
-        assert_eq!(page.get_freespace_size(), 4096);
-        assert_eq!(page.get_slot_ptr(), 5);
+        assert_eq!(
+            page.get_metadata(METADATA::_FreespaceSize),
+            (PAGE_SIZE - METADATA_SIZE) as u16
+        );
 
-        page._set_ptr_to_freespace(2);
-        page._set_page_id(2);
-        page._set_freespace_size(4090);
-        page.set_slot_ptr(page.get_slot_ptr() + 1);
+        assert_eq!(page.get_metadata(METADATA::_NumberOfSlots), 0);
 
-        assert_eq!(page.get_ptr_to_freespace(), 2);
-        assert_eq!(page.get_page_id(), 2);
-        assert_eq!(page.next_pg_id(), 3);
-        assert_eq!(page.get_freespace_size(), 4090);
-        assert_eq!(page.get_slot_ptr(), 6);
+        let new_tuple_length: u16 = 80;
+        page.update_freespace_values(new_tuple_length).unwrap();
+
+        assert_eq!(
+            page.get_metadata(METADATA::_FreespacePointer),
+            new_tuple_length
+        );
+
+        assert_eq!(
+            page.get_metadata(METADATA::_FreespaceSize),
+            (PAGE_SIZE - METADATA_SIZE) as u16 - new_tuple_length
+        );
+
+        page.print_metadata();
+
+        let new_tuple_length: u16 = 4000;
+        page.update_freespace_values(new_tuple_length)
+            .expect_err("Cannot insert tuple of this length");
+
+        println!("{:?}", page.data);
+    }
+
+    #[test]
+
+    fn slot_test() {
+        let prev: Option<u16> = None;
+        let mut page: Page = <Page as SlottedPage>::new(prev);
+
+        let new_tuple_length: u16 = 80;
+        let mut cur_offset: u16 = 0;
+
+        for _i in 0..4 {
+            page.update_freespace_values(new_tuple_length).unwrap();
+            page.slot_append(cur_offset.to_le_bytes());
+
+            cur_offset += 80;
+        }
+
+        page.print_slot();
+
+        page.print_metadata();
+
+        assert_eq!(page.get_slot_at_index(0).expect(""), [0, 0]);
+        assert_eq!(page.get_slot_at_index(1).expect(""), [80, 0]);
+        assert_eq!(page.get_slot_at_index(2).expect(""), [160, 0]);
+        assert_eq!(page.get_slot_at_index(3).expect(""), [240, 0]);
+
+        page.slot_remove_marker(3).expect("");
+
+        // Fragmented space is created, this will not be reflected in the meta data
+        page.slot_remove_marker(9).expect_err("");
+        assert_eq!(page.get_slot_at_index(3).expect(""), [0, 0]);
+        page.print_slot();
     }
 
     #[test]
@@ -364,19 +440,21 @@ mod tests {
         schema_reorder(&mut values_array, &schema);
         let mut values = extract_byte_box_data(values_array);
 
-        let tuple = Tuple::build(&mut values, &mut schema).expect("Faild to build tuple");
-        let tuple_two = Tuple::build(&mut values, &mut schema).expect("Faild to build tuple");
-        let tuple_three: Tuple =
-            Tuple::build(&mut values, &mut schema).expect("Faild to build tuple");
+        let mut i = 0;
+        loop {
+            let tuple = Tuple::build(&mut values, &mut schema).expect("Faild to build tuple");
+            let res = page.append(tuple);
+            println!("iteration {} ", i);
 
-        let tuple_four: Tuple =
-            Tuple::build(&mut values, &mut schema).expect("Faild to build tuple");
+            i += 1;
 
-        page.append(tuple);
-        page.append(tuple_two);
-        page.append(tuple_three);
-        page.append(tuple_four);
+            if res.is_none() {
+                println!("Page is full");
+                break;
+            }
+        }
 
-        print!("{:?}", page.data);
+        page.print_slot();
+        println!("{:?}", page.data);
     }
 }
