@@ -5,21 +5,6 @@ use std::{
     sync::atomic::{AtomicBool, AtomicI32},
 };
 
-/*
-    To prevent me from ripping my hair off my head, i'll  recreate this page implementation from scratch.
-    I am now aware of the things i need to do on a technical bases to implement the mechanism
-
-    Problems with the current slotted page
-
-    Constants are hard to read
-    Didn't test in-place edits of data within the byte stream
-    Data isn't compartmentalized enough
-    incorrent logic for insertions
-
-    Formalize everything, try again.
-
-*/
-
 use page_constants::{
     BYTE_LENGTH_2, FREESPACE_POINTER, FREESPACE_SIZE, METADATA_SIZE, METADATA_STARTING_OFFSET,
     NUMBER_OF_SLOTS, PAGE_ID, PAGE_SIZE, STARTING_SLOT_OFFSET,
@@ -63,6 +48,8 @@ pub trait SlottedPage {
     // Param Prev Page ID
     fn new(prev_page: Option<u16>) -> Page;
     fn append(&mut self, tuple: Tuple) -> Option<usize>;
+    fn get_tuple(&self, index: u16) -> Option<Tuple>;
+
     // fn next_pg_id(&self) -> u8;
 
     // // Will be implement after page b-tree has been put in place
@@ -87,6 +74,8 @@ pub trait SlottedPage {
 
     fn print_slot(&self);
     fn print_metadata(&self);
+
+    // get tuples using slots
 }
 
 impl SlottedPage for Page {
@@ -141,16 +130,37 @@ impl SlottedPage for Page {
         let freespace_pointer = self.get_metadata(METADATA::_FreespacePointer);
 
         if self.update_freespace_values(tuple_len).is_ok() {
-            let tuple_len_bytes = tuple_len.to_le_bytes();
+            let slot_offset_bytes = (freespace_pointer).to_le_bytes();
             self.write_data(tuple.data, tuple_len as usize, freespace_pointer as usize);
 
-            self.slot_append(tuple_len_bytes);
+            self.slot_append(slot_offset_bytes);
 
             return Some((tuple_len + freespace_pointer) as usize);
         } else {
             // Not enough space to append the tuple
             return None;
         }
+    }
+    fn get_tuple(&self, index: u16) -> Option<Tuple> {
+        let slot = self.get_slot_at_index(index);
+
+        if slot.is_err() {
+            return None;
+        }
+
+        let slot = slot.unwrap();
+        let offset = u16::from_le_bytes([slot[0], slot[1]]) as usize;
+
+        let len_slice = &self.data[offset..offset + BYTE_LENGTH_2];
+        let length = u16::from_le_bytes([len_slice[0], len_slice[1]]) as usize;
+
+        let tuple_data = &self.data[offset..offset + length];
+
+        let tuple = Tuple {
+            data: tuple_data.to_vec(),
+        };
+
+        Some(tuple)
     }
 
     // Wrapper around a memove
@@ -239,7 +249,6 @@ impl SlottedPage for Page {
         );
 
         Ok(())
-
     }
 
     fn print_slot(&self) {
@@ -262,7 +271,7 @@ impl SlottedPage for Page {
         let index = index as usize;
 
         let number_of_slots = self.get_metadata(METADATA::_NumberOfSlots);
-        if index > number_of_slots as usize {
+        if index > number_of_slots as usize - 1 {
             return Err(-1);
         }
 
@@ -278,6 +287,7 @@ impl SlottedPage for Page {
 
         Ok(data)
     }
+
     fn slot_append(&mut self, tuple_offset_len: [u8; 2]) {
         // Slot insertion index
         let number_of_slots = self.get_metadata(METADATA::_NumberOfSlots);
@@ -440,21 +450,18 @@ mod tests {
         schema_reorder(&mut values_array, &schema);
         let mut values = extract_byte_box_data(values_array);
 
-        let mut i = 0;
         loop {
             let tuple = Tuple::build(&mut values, &mut schema).expect("Faild to build tuple");
             let res = page.append(tuple);
-            println!("iteration {} ", i);
-
-            i += 1;
-
             if res.is_none() {
                 println!("Page is full");
                 break;
             }
         }
 
-        page.print_slot();
-        println!("{:?}", page.data);
+        
+        let tuple = page.get_tuple(48).unwrap();
+
+        println!("Tuple \n{:?}", tuple.data);
     }
 }
