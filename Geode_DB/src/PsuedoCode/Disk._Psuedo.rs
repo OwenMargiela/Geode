@@ -3,7 +3,7 @@
     Protoype
     Disk Scheduler
         Bus Tub's  scheduler utalized asynchrous shared queues
-        to implement a async i/o mechanism. The usage of io_uring
+        to implement an async i/o mechanism. The usage of io_uring
         mitigates the need for our system to do the same. However,
         they are things to be done to optimize the scheduler in ways
         that suit us.
@@ -24,18 +24,6 @@
 */
 
 /*
-    Disk Request
-        is_write
-        data
-        page_id
-
-*/
-/*
-    Disk Scheduler
-        Disk Manager
-*/
-
-/*
     The General idea is to implement a structure in which multiple request can be produced
     asynchronously. A method that allows for us as the programmer to know when one a given disk
     operation was successful is should also be put in place. Any mechanism used to manage
@@ -48,12 +36,6 @@
 
 
 */
-
-
-
-
-
-
 
 /*
 use io_uring::{IoUring, opcode, types};
@@ -71,7 +53,7 @@ use std::{
 struct IoState {
     ring: IoUring,
     wakers: HashMap<u64, Waker>, // Stores wakers mapped to user_data
-    // include a mechanism to reset the ID 
+    // include a mechanism to reset the ID
     nextID(1)
 }
 
@@ -169,7 +151,7 @@ async fn main() {
     // replace manually id with a monotomically increasing
     // atomic ID
     // implememnt the pool of file description with lru eviction or since i'm gonna implement lru k ig that one
-    
+
     let read_future = IoUringFuture::new(state.clone(), fd, 4096, 1);
 
     match read_future.await {
@@ -177,6 +159,42 @@ async fn main() {
         Err(e) => eprintln!("Read Error: {:?}", e),
     }
 }
+*/
+
+/*
+
+    Disk Request
+        is_write
+        data
+        page_id
+        table_unique_identifier
+
+    FdPool
+        acknowledge that the os can handle only so much open file descriptors at a time
+        file_descriptors : Vec< FileDescriptors >
+
+
+*/
+
+/*
+
+    Where am I putting these files, surely not within the code base?
+    In another directory perhaps?
+    
+    // Attributes
+    
+    If anything, a shared queue can be implemented if the IO is filled to capacity to aid with retries.
+    This is more of an optimization.
+
+    Disk scheduler
+        state: IoState // monotomically increasing ID
+        fd_pool: FdPool
+
+    
+    // Methods
+
+    Disk scheduler
+        schedule( DiskRequest ) -> IoFuture
 
 
 */

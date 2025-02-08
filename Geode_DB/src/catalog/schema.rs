@@ -253,6 +253,7 @@ impl<'a> Schema<'a> {
     pub fn icrement_version(&mut self) {
         self.version += 1;
     }
+   
     pub fn validate_fields(&self, values: &Vec<ByteBox>) -> bool {
         let schema_len = self.length;
 

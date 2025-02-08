@@ -138,6 +138,7 @@ impl Tuple {
             Some(field)
         }
     }
+    
     fn serialize_body(
         values: &Vec<ByteBox>,
         data_ptrs: &mut Vec<u8>,
@@ -494,7 +495,6 @@ mod tests {
     Slotted Page
     Page Directory
     Disk Manager
-    Scheduler
     LRU-K
 
 */

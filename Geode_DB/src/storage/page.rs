@@ -1,6 +1,4 @@
 use std::{
-    env::consts,
-    ops::Index,
     ptr::copy,
     sync::atomic::{AtomicBool, AtomicI32},
 };
@@ -43,27 +41,21 @@ pub enum METADATA {
     _NumberOfSlots,
 }
 
+// TODO
+// fn deletion_marker(slot_entry: usize) -> usize;
+// fn deletion_apply(slot_entry: usize) -> usize;
+// Un-deletions your marker :)
+// fn rollback_delete(slot_entry: usize) -> usize;
 // make internal interfaces
+
 pub trait SlottedPage {
     // Param Prev Page ID
     fn new(prev_page: Option<u16>) -> Page;
     fn append(&mut self, tuple: Tuple) -> Option<usize>;
     fn get_tuple(&self, index: u16) -> Option<Tuple>;
 
-    // fn next_pg_id(&self) -> u8;
-
-    // // Will be implement after page b-tree has been put in place
-    // // fn insert(tuple: Tuple, offset: usize) -> Option<usize>;
-
-    // // fn deletion_marker(slot_entry: usize) -> usize;
-    // // fn deletion_apply(slot_entry: usize) -> usize;
-    // // // Un-deletions your marker :)
-    // // fn rollback_delete(slot_entry: usize) -> usize;
-
     // // writes data, any data you want baby
     fn write_data(&mut self, src: Vec<u8>, len: usize, starting_position: usize) -> usize;
-
-    // fn get_tuple(slot_entry: usize) -> usize;
 
     fn get_metadata(&self, metadata: METADATA) -> u16;
     fn update_freespace_values(&mut self, data_length: u16) -> Result<(), i8>;
@@ -141,6 +133,7 @@ impl SlottedPage for Page {
             return None;
         }
     }
+
     fn get_tuple(&self, index: u16) -> Option<Tuple> {
         let slot = self.get_slot_at_index(index);
 
@@ -459,9 +452,8 @@ mod tests {
             }
         }
 
-        
         let tuple = page.get_tuple(48).unwrap();
 
-        println!("Tuple \n{:?}", tuple.data);
+        println!("{:?}",page.data);
     }
 }
