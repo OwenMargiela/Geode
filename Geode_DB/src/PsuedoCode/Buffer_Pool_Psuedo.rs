@@ -23,6 +23,8 @@
     imple Replacer for ClockReplacer {}
 */
 
+// A config file might be useful
+
 /*
     FrameHeader
         Index of the fram this header represents

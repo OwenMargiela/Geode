@@ -454,6 +454,6 @@ mod tests {
 
         let tuple = page.get_tuple(48).unwrap();
 
-        println!("{:?}",page.data);
+        println!("{:?}",page.data); 
     }
 }

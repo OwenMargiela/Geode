@@ -119,11 +119,12 @@
     amount of free space on each page.
     
     A data page that data only containes the freespace associated with slotted pages
-    Implemented as a b-tree map witha pointer to the next page if you just have a 
+    Implemented as a b-tree map with a pointer to the next page if you just have a 
     god awful amount of pages I gues
 
-    [ key: page_id, value: amount of freespace ]
+    [ key: page_id], value: amount of freespace ]
 
+    
     Leave implementation to when I'm creating the index
     impl FreeSpaceMap for Page {}
 
