@@ -103,26 +103,26 @@ impl Replacer for LRUKReplacer {
     }
 
     fn evict(&mut self) -> Option<u32> {
-
         if self.size() == 0 {
             return None;
         }
 
         let store = &self.node_store;
 
-        // filter out evictable nodes
-        let evictable_nodes: Vec<(&u32, &LRUKNode)> =
-            store.iter().filter(|node| node.1.is_evictable).collect();
-
         // param entry_id and k-backwards distance and last time_stamp
-        let mut node_data: Vec<(u32, Option<usize>, usize)> =
-            Vec::with_capacity(evictable_nodes.len());
+        let mut node_data: Vec<(u32, Option<usize>, usize)> = Vec::new();
 
         let cur_time = &self
             .current_timestamp
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
 
-        for node in evictable_nodes {
+        // An optimization to consolodate logic into one linear loop
+        for node in store {
+            // filter out evictable nodes
+            if !node.1.is_evictable {
+                continue;
+            }
+
             let node_id = node.0;
             let k_distance: Option<usize> = match node.1.get_kth_entry() {
                 Some(entry) => Some(cur_time - entry),
@@ -249,7 +249,6 @@ pub mod test {
 
     #[test]
     fn replacer_test() {
-        
         // Initialize the replacer
         let mut replacer = LRUKReplacer::new(7, 2);
         // Add six frames to the replacer. We now have frames [1, 2, 3, 4, 5]. We set frame 6 as non-evictable.
