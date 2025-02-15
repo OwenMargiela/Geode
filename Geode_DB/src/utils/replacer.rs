@@ -2,6 +2,7 @@ use std::sync::atomic::AtomicUsize;
 
 use hashlink::LinkedHashMap;
 
+const POS_INIFINITY: Option<usize> = None;
 pub trait Replacer {
     fn evict(&mut self) -> Option<u32>;
     fn record_access(&mut self, entriy_id: u32) -> Option<i8>;
@@ -15,16 +16,14 @@ struct LRUKNode {
     history: Vec<usize>,
     is_evictable: bool,
     k: usize,
-    eid: u32,
 }
 
 impl LRUKNode {
-    pub fn new(k: usize, entry_id: u32) -> Self {
+    pub fn new(k: usize) -> Self {
         LRUKNode {
             history: Vec::new(),
             is_evictable: false,
             k: k,
-            eid: entry_id,
         }
     }
 
@@ -79,7 +78,7 @@ impl Replacer for LRUKReplacer {
                 if self.node_store.len() == self.replacer_size {
                     return None;
                 }
-                let mut new_node = LRUKNode::new(self.k, entriy_id);
+                let mut new_node = LRUKNode::new(self.k);
                 new_node.set_evictable(false);
 
                 new_node.push_timestamp(
@@ -103,28 +102,19 @@ impl Replacer for LRUKReplacer {
         Some(1)
     }
 
-    // Results are needed because list might be empty
     fn evict(&mut self) -> Option<u32> {
+
         if self.size() == 0 {
-            println!("Not enough evictable nodes");
             return None;
         }
 
         let store = &self.node_store;
 
-        // println!("Store {:?}", store);
-
         // filter out evictable nodes
         let evictable_nodes: Vec<(&u32, &LRUKNode)> =
             store.iter().filter(|node| node.1.is_evictable).collect();
 
-        if evictable_nodes.len() <= 0 {
-            println!("empty list");
-            return None; // no evictable nodes
-        }
-
         // param entry_id and k-backwards distance and last time_stamp
-        // None being an alias for +inf
         let mut node_data: Vec<(u32, Option<usize>, usize)> =
             Vec::with_capacity(evictable_nodes.len());
 
@@ -136,7 +126,7 @@ impl Replacer for LRUKReplacer {
             let node_id = node.0;
             let k_distance: Option<usize> = match node.1.get_kth_entry() {
                 Some(entry) => Some(cur_time - entry),
-                None => None,
+                None => POS_INIFINITY,
             };
 
             let last_time_stamp = node.1.get_last_entry();
@@ -162,7 +152,7 @@ impl Replacer for LRUKReplacer {
                     oldest_timestamp_id = id;
                 }
 
-                // Track first None (infinity) encountered
+                // Track first POS_INFINITY encountered
                 if k_distance.is_none() && first_none_id.is_none() {
                     first_none_id = Some(id);
                     continue;
@@ -259,8 +249,8 @@ pub mod test {
 
     #[test]
     fn replacer_test() {
+        
         // Initialize the replacer
-
         let mut replacer = LRUKReplacer::new(7, 2);
         // Add six frames to the replacer. We now have frames [1, 2, 3, 4, 5]. We set frame 6 as non-evictable.
 
@@ -284,7 +274,6 @@ pub mod test {
         replacer.record_access(1);
         let node = replacer.node_store.get(&1).unwrap();
         assert_eq!(2, node.history.len());
-        println!("Node 1 history: {:?}", node.history);
 
         //  All other entry now share the maximum backward k-distance. Since we use timestamps to break ties, where the first
         //  to be evicted is the frame with the oldest timestamp, the order of eviction should be [2, 3, 4, 5, 1].
@@ -341,7 +330,6 @@ pub mod test {
         //   Insert frame 1 again and mark it as non-evictable.
         replacer.record_access(1);
         replacer.set_evictable(1, false);
-        println!("{:?}", replacer.node_store.get(&1));
 
         assert_eq!(0, replacer.size());
 
@@ -368,47 +356,3 @@ pub mod test {
         replacer.set_evictable(6, true);
     }
 }
-
-//   // Mark frame 1 as non-evictable. We now have [5, 4].
-//   lru_replacer.SetEvictable(1, false);
-
-//   // We expect frame 5 to be evicted next.
-//   ASSERT_EQ(2, lru_replacer.Size());
-//   ASSERT_EQ(5, lru_replacer.Evict());
-//   ASSERT_EQ(1, lru_replacer.Size());
-
-//   // Update the access history for frame 1 and make it evictable. Now we have [4, 1].
-//   lru_replacer.RecordAccess(1);
-//   lru_replacer.RecordAccess(1);
-//   lru_replacer.SetEvictable(1, true);
-//   ASSERT_EQ(2, lru_replacer.Size());
-
-//   // Evict the last two entry.
-//   ASSERT_EQ(4, lru_replacer.Evict());
-//   ASSERT_EQ(1, lru_replacer.Size());
-//   ASSERT_EQ(1, lru_replacer.Evict());
-//   ASSERT_EQ(0, lru_replacer.Size());
-
-//   // Insert frame 1 again and mark it as non-evictable.
-//   lru_replacer.RecordAccess(1);
-//   lru_replacer.SetEvictable(1, false);
-//   ASSERT_EQ(0, lru_replacer.Size());
-
-//   // A failed eviction should not change the size of the replacer.
-//   frame = lru_replacer.Evict();
-//   ASSERT_EQ(false, frame.has_value());
-
-//   // Mark frame 1 as evictable again and evict it.
-//   lru_replacer.SetEvictable(1, true);
-//   ASSERT_EQ(1, lru_replacer.Size());
-//   ASSERT_EQ(1, lru_replacer.Evict());
-//   ASSERT_EQ(0, lru_replacer.Size());
-
-//   // There is nothing left in the replacer, so make sure this doesn't do something strange.
-//   frame = lru_replacer.Evict();
-//   ASSERT_EQ(false, frame.has_value());
-//   ASSERT_EQ(0, lru_replacer.Size());
-
-//   // Make sure that setting a non-existent frame as evictable or non-evictable doesn't do something strange.
-//   lru_replacer.SetEvictable(6, false);
-//   lru_replacer.SetEvictable(6, true);
