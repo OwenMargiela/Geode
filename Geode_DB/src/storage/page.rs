@@ -16,6 +16,7 @@ pub struct Page {
     _is_dirty: AtomicBool,
 }
 pub mod page_constants {
+    // Constants for the slotted page structure
     // Offsets
     pub const METADATA_STARTING_OFFSET: usize = PAGE_SIZE - METADATA_SIZE;
     // Offsets within the metadata sub array
@@ -40,6 +41,8 @@ pub enum METADATA {
     _FreespaceSize,
     _NumberOfSlots,
 }
+
+
 
 // TODO
 // fn deletion_marker(slot_entry: usize) -> usize;

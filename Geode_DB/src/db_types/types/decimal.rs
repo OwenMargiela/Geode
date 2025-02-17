@@ -61,13 +61,6 @@ impl<'a> DataBox<'a, Decimal<'a>> for Decimal<'a> {
             data_type_string::DECIMAL => Some(data_type_string::DECIMAL),
             _ => None,
         }
-
-        // if self.is_coercable_to(type_id) {
-        //     //  Since the other types have not be implemented just as yet, lets return somthing generic
-        //     Some(DataType::INT)
-        // } else {
-        //     None
-        // }
     }
 
     fn unwrap_value(&self) -> f32 {
