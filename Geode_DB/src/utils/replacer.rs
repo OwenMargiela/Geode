@@ -45,7 +45,7 @@ impl LRUKNode {
     }
 }
 
-struct LRUKReplacer<ID: Eq + Hash + Copy> {
+pub struct LRUKReplacer<ID: Eq + Hash + Copy> {
     node_store: LinkedHashMap<ID, LRUKNode>,
     current_timestamp: AtomicUsize,
     current_size: AtomicUsize,
@@ -55,7 +55,7 @@ struct LRUKReplacer<ID: Eq + Hash + Copy> {
 }
 
 impl<ID: Eq + Hash + Copy> LRUKReplacer<ID> {
-    fn new(number_of_entries: usize, k: usize) -> Self {
+    pub fn new(number_of_entries: usize, k: usize) -> Self {
         LRUKReplacer {
             node_store: LinkedHashMap::new(),
             current_timestamp: AtomicUsize::new(0),
@@ -69,6 +69,7 @@ impl<ID: Eq + Hash + Copy> LRUKReplacer<ID> {
 
 impl<ID: Eq + Hash + Copy> Replacer<ID> for LRUKReplacer<ID> {
     fn record_access(&mut self, entry_id: ID) -> Option<i8> {
+
         match self.node_store.get_mut(&entry_id) {
             None => {
                 if self.node_store.len() == self.replacer_size {
@@ -204,7 +205,7 @@ pub mod test {
         //  All other entry now share the maximum backward k-distance. Since we use timestamps to break ties, where the first
         //  to be evicted is the frame with the oldest timestamp, the order of eviction should be [2, 3, 4, 5, 1].
 
-        //  Evict three pages from the replacer.
+        //  Evict three entries from the replacer.
         //  To break ties, we use LRU with respect to the oldest timestamp, or the least recently used frame.
 
         // All other entries now share the maximum backward k-distance. Since we use timestamps to break ties, where the first
