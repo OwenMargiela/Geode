@@ -9,6 +9,7 @@ dependencies = [
  "byteorder",
  "hashlink",
  "io-uring",
+ "libc",
  "tokio",
 ]
 

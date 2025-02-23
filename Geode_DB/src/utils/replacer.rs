@@ -1,6 +1,6 @@
-use std::sync::atomic::AtomicUsize;
-use std::hash::Hash;
 use hashlink::LinkedHashMap;
+use std::hash::Hash;
+use std::sync::atomic::AtomicUsize;
 
 const POS_INFINITY: Option<usize> = None;
 
@@ -65,11 +65,14 @@ impl<ID: Eq + Hash + Copy> LRUKReplacer<ID> {
             k,
         }
     }
+
+    pub fn get_replacer_size(&self) -> &usize {
+        &self.replacer_size
+    }
 }
 
 impl<ID: Eq + Hash + Copy> Replacer<ID> for LRUKReplacer<ID> {
     fn record_access(&mut self, entry_id: ID) -> Option<i8> {
-
         match self.node_store.get_mut(&entry_id) {
             None => {
                 if self.node_store.len() == self.replacer_size {
@@ -77,12 +80,19 @@ impl<ID: Eq + Hash + Copy> Replacer<ID> for LRUKReplacer<ID> {
                 }
                 let mut new_node = LRUKNode::new(self.k);
                 new_node.set_evictable(false);
-                new_node.push_timestamp(self.current_timestamp.fetch_add(1, std::sync::atomic::Ordering::SeqCst));
+                new_node.push_timestamp(
+                    self.current_timestamp
+                        .fetch_add(1, std::sync::atomic::Ordering::SeqCst),
+                );
                 self.node_store.insert(entry_id, new_node);
-                self.current_size.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                self.current_size
+                    .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
             }
             Some(node) => {
-                node.push_timestamp(self.current_timestamp.fetch_add(1, std::sync::atomic::Ordering::SeqCst));
+                node.push_timestamp(
+                    self.current_timestamp
+                        .fetch_add(1, std::sync::atomic::Ordering::SeqCst),
+                );
             }
         }
         Some(1)
@@ -93,12 +103,19 @@ impl<ID: Eq + Hash + Copy> Replacer<ID> for LRUKReplacer<ID> {
             return None;
         }
 
-        let cur_time = self.current_timestamp.load(std::sync::atomic::Ordering::Relaxed);
+        let cur_time = self
+            .current_timestamp
+            .load(std::sync::atomic::Ordering::Relaxed);
 
-        let node_data: Vec<(ID, Option<usize>, usize)> = self.node_store.iter()
+        let node_data: Vec<(ID, Option<usize>, usize)> = self
+            .node_store
+            .iter()
             .filter(|(_, node)| node.is_evictable)
             .map(|(id, node)| {
-                let k_distance = node.get_kth_entry().map(|&entry| cur_time - entry).or(POS_INFINITY);
+                let k_distance = node
+                    .get_kth_entry()
+                    .map(|&entry| cur_time - entry)
+                    .or(POS_INFINITY);
                 (*id, k_distance, *node.get_last_entry())
             })
             .collect();
@@ -133,7 +150,9 @@ impl<ID: Eq + Hash + Copy> Replacer<ID> for LRUKReplacer<ID> {
                 }
             }
 
-            first_none_id.or(max_k_distance_id).or(Some(oldest_timestamp_id))
+            first_none_id
+                .or(max_k_distance_id)
+                .or(Some(oldest_timestamp_id))
         }
 
         let evicted_node_id = find_max_or_oldest(&node_data)?;
@@ -145,8 +164,10 @@ impl<ID: Eq + Hash + Copy> Replacer<ID> for LRUKReplacer<ID> {
         if let Some(node) = self.node_store.get(&entry_id) {
             if node.is_evictable {
                 self.node_store.remove(&entry_id);
-                self.evictable_size.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
-                self.current_size.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+                self.evictable_size
+                    .fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+                self.current_size
+                    .fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
                 return true;
             }
         }
@@ -157,8 +178,12 @@ impl<ID: Eq + Hash + Copy> Replacer<ID> for LRUKReplacer<ID> {
         if let Some(node) = self.node_store.get_mut(&entry_id) {
             if node.is_evictable != evictability {
                 match evictability {
-                    true => self.evictable_size.fetch_add(1, std::sync::atomic::Ordering::SeqCst),
-                    false => self.evictable_size.fetch_sub(1, std::sync::atomic::Ordering::SeqCst),
+                    true => self
+                        .evictable_size
+                        .fetch_add(1, std::sync::atomic::Ordering::SeqCst),
+                    false => self
+                        .evictable_size
+                        .fetch_sub(1, std::sync::atomic::Ordering::SeqCst),
                 };
             }
             node.set_evictable(evictability);
@@ -166,10 +191,10 @@ impl<ID: Eq + Hash + Copy> Replacer<ID> for LRUKReplacer<ID> {
     }
 
     fn size(&self) -> usize {
-        self.evictable_size.load(std::sync::atomic::Ordering::SeqCst)
+        self.evictable_size
+            .load(std::sync::atomic::Ordering::SeqCst)
     }
 }
-
 
 #[cfg(test)]
 pub mod test {

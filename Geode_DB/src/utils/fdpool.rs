@@ -2,13 +2,13 @@ use std::{collections::HashMap, fs::File, os::unix::fs::MetadataExt};
 
 use super::replacer::{LRUKReplacer, Replacer};
 
-struct FdPool {
+pub struct FdPool {
     descriptors: HashMap<u64, File>,
     replacer: LRUKReplacer<u64>,
 }
 
 impl FdPool {
-    fn new(number_of_entries: usize, k: usize) -> Self {
+    pub fn new(number_of_entries: usize, k: usize) -> Self {
         let replacer = LRUKReplacer::new(number_of_entries, k);
 
         FdPool {
@@ -18,8 +18,11 @@ impl FdPool {
     }
 
     // Returns the file identifier and the a potentially evicted file identifier
-    fn set(&mut self, file_descriptor: File) -> (Option<u64>, Option<u64>) {
-        let file_id = file_descriptor.metadata().expect("File exist").ino();
+    pub fn set(&mut self, file_descriptor: File) -> (Option<u64>, Option<u64>) {
+        let file_id = match file_descriptor.metadata() {
+            Ok(metadata) => metadata.ino(),
+            Err(_) => return (None, None),
+        };
 
         match self.replacer.record_access(file_id) {
             Some(_) => {
@@ -42,7 +45,7 @@ impl FdPool {
         }
     }
 
-    fn get(&mut self, entry_id: u64) -> Option<&File> {
+    pub fn get(&mut self, entry_id: u64) -> Option<&File> {
         match self.descriptors.get(&entry_id) {
             Some(file) => {
                 self.replacer.record_access(entry_id);
@@ -51,9 +54,9 @@ impl FdPool {
             None => return None,
         }
     }
-
-    // Toggles the evictability to the opposite
-    // fn toggle_evictable(entry_id: u64) -> bool {}
+    pub fn get_replacer_size(&self) -> &usize {
+        self.replacer.get_replacer_size()
+    }
 }
 
 #[cfg(test)]
@@ -73,17 +76,15 @@ pub mod tests {
         let file_3: File = File::create("path_3.txt").expect("File open");
 
         // Add six file_descriptors to the replacer. We now have frames [1, 2, 3, 4, 5, 6]
-
         let (id_1, _) = fd_pool.set(file_1);
         let (id_2, _) = fd_pool.set(file_2);
 
         fd_pool.get(id_1.unwrap());
-
         assert_eq!(MAX_SIZE, fd_pool.replacer.size());
 
         let (_, evicted_file_id_3) = fd_pool.set(file_3);
 
-        // // Reaching the maximum size should evict the entry id_2
+        // Reaching the maximum size should evict the entry id_2
         assert_eq!(id_2.unwrap(), evicted_file_id_3.unwrap());
 
         assert_eq!(true, fd_pool.get(id_2.unwrap()).is_none());
