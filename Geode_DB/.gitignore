@@ -1,1 +1,4 @@
 target/
+geodeData/
+
+log_file_path.bin

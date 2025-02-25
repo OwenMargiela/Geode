@@ -1,9 +1,11 @@
 use std::{
+    alloc::{alloc, Layout},
     collections::{HashMap, VecDeque},
-    fs::{create_dir, File, OpenOptions},
+    fs::{ File, OpenOptions},
     io::{Read, Seek, SeekFrom, Write},
     os::unix::fs::OpenOptionsExt,
     path::{Path, PathBuf},
+    slice,
     sync::{
         atomic::{AtomicBool, AtomicU64},
         Arc,
@@ -11,7 +13,6 @@ use std::{
 };
 
 use hashlink::LinkedHashMap;
-use libc::posix_memalign;
 
 use crate::{storage::page::page_constants::PAGE_SIZE, utils::fdpool::FdPool};
 
@@ -42,7 +43,7 @@ struct FileMetadata {
 // isn't the most optimal solution. However, it does provide a point from which to gain
 // insights on which pages have been allocated and deallocatedy o
 
-struct Manager {
+pub struct Manager {
     // Mapping of inode numbers to file paths
     // Might be replaced by a table within the system catalogue
     file_map: HashMap<u64, PathBuf>,
@@ -64,6 +65,7 @@ struct Manager {
 }
 
 impl Manager {
+    
     pub fn new(log_io: File, log_file_path: PathBuf) -> Self {
         Manager {
             file_map: HashMap::new(),
@@ -79,7 +81,7 @@ impl Manager {
         }
     }
 
-    fn allocate_page(&mut self, file_id: u64) -> (u32, u64) {
+    pub fn allocate_page(&mut self, file_id: u64) -> (u32, u64) {
         // Instantiating meta data for a db file
         let file_meta = self.files.entry(file_id).or_insert(FileMetadata {
             pages: LinkedHashMap::new(),
@@ -101,7 +103,7 @@ impl Manager {
         (pages_len as u32, offset)
     }
 
-    fn write_page(&mut self, file_id: u64, page_id: u32, page_data: &[u8]) -> Result<(), String> {
+    pub fn write_page(&mut self, file_id: u64, page_id: u32, page_data: &[u8]) -> Result<(), String> {
         let file_meta = self
             .files
             .get_mut(&file_id)
@@ -150,7 +152,7 @@ impl Manager {
         Ok(())
     }
 
-    fn read_page(
+    pub fn read_page(
         &mut self,
         file_id: u64,
         page_id: u32,
@@ -190,7 +192,7 @@ impl Manager {
         Ok(())
     }
 
-    fn delete_page(&mut self, file_id: u64, page_id: u32) -> Result<(), String> {
+    pub fn delete_page(&mut self, file_id: u64, page_id: u32) -> Result<(), String> {
         let file_meta = self
             .files
             .get_mut(&file_id)
@@ -211,32 +213,28 @@ impl Manager {
         Ok(())
     }
 
-    fn aligned_buffer(data: &[u8]) -> *mut u8 {
+    pub fn aligned_buffer(data: &[u8]) -> Box<[u8]> {
         assert!(data.len() <= PAGE_SIZE, "Data exceeds PAGE_SIZE!");
 
-        let mut ptr: *mut u8 = std::ptr::null_mut();
-        let res = unsafe {
-            posix_memalign(
-                &mut ptr as *mut _ as *mut *mut libc::c_void,
-                PAGE_SIZE,
-                PAGE_SIZE,
-            )
-        };
+        let layout = Layout::from_size_align(PAGE_SIZE, PAGE_SIZE).unwrap();
+        let ptr = unsafe { alloc(layout) };
 
-        if res != 0 {
+        if ptr.is_null() {
             panic!("Failed to allocate aligned buffer!");
         }
 
-        // ✅ Copy data into aligned buffer
         unsafe {
             std::ptr::copy_nonoverlapping(data.as_ptr(), ptr, data.len());
+            let slice = slice::from_raw_parts_mut(ptr, PAGE_SIZE);
+            Box::from_raw(slice)
         }
-
-        ptr
     }
 
+
+
+    // Mayber these should not be functions of the disk manager
     // WAL
-    fn open_log() -> (File, PathBuf) {
+    pub fn open_log() -> (File, PathBuf) {
         let log_file_path = PathBuf::from("log_file_path.bin");
         let log_file = OpenOptions::new()
             .read(true)
@@ -253,7 +251,8 @@ impl Manager {
 
         (log_file, log_file_path)
     }
-    fn create_db_file(&mut self) -> Result<(u64, PathBuf), i8> {
+    
+    pub fn create_db_file(&mut self) -> Result<(u64, PathBuf), i8> {
         std::fs::create_dir_all("geodeData/base").unwrap();
 
         let oid = self
@@ -282,6 +281,9 @@ impl Manager {
 
         Ok((file_ino, path.to_path_buf()))
     }
+
+    // TODO
+    // Add a shutdown to empty  the file descriptor pool
 }
 
 #[cfg(test)]
@@ -293,9 +295,6 @@ pub mod test {
     };
 
     use crate::storage::page::page_constants::PAGE_SIZE;
-
-    use libc::free;
-
     use super::Manager;
 
     #[test]
@@ -303,37 +302,23 @@ pub mod test {
         let (log_file, log_file_path) = Manager::open_log();
         let mut manager = Manager::new(log_file, log_file_path);
 
-        let buffer = [1; PAGE_SIZE];
-        let page_buffer = Manager::aligned_buffer(&Vec::with_capacity(PAGE_SIZE));
-        let page_data = Manager::aligned_buffer(&buffer);
+        let data = [1; PAGE_SIZE];
+        let buffer = Vec::with_capacity(PAGE_SIZE);
+
+        let mut page_buffer = Manager::aligned_buffer(&buffer);
+        let page_data = Manager::aligned_buffer(&data);
 
         let (file_id, _) = manager.create_db_file().expect("File made");
 
+        
         let (page_id, _) = manager.allocate_page(file_id);
-
+        manager.write_page(file_id, page_id, &page_data).unwrap();
         manager
-            .write_page(file_id, page_id, unsafe {
-                std::slice::from_raw_parts(page_data, PAGE_SIZE)
-            })
-            .unwrap();
-
-        manager
-            .read_page(file_id, page_id, unsafe {
-                std::slice::from_raw_parts_mut(page_buffer, PAGE_SIZE)
-            })
+            .read_page(file_id, page_id, &mut page_buffer)
             .expect("Failed to read page");
 
-        assert_eq!(
-            unsafe { std::slice::from_raw_parts(page_data, PAGE_SIZE) },
-            unsafe { std::slice::from_raw_parts(page_buffer, PAGE_SIZE) },
-            "Page read mismatch!"
-        );
 
-        // Free buffers to avoid memory leaks
-        unsafe {
-            free(page_data as *mut libc::c_void);
-            free(page_buffer as *mut libc::c_void);
-        }
+        assert_eq!(page_data, page_buffer, "Page read mismatch!");
     }
 
     #[test]
