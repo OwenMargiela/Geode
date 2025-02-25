@@ -1,7 +1,7 @@
 use std::{
     alloc::{alloc, Layout},
     collections::{HashMap, VecDeque},
-    fs::{ File, OpenOptions},
+    fs::{File, OpenOptions},
     io::{Read, Seek, SeekFrom, Write},
     os::unix::fs::OpenOptionsExt,
     path::{Path, PathBuf},
@@ -65,7 +65,6 @@ pub struct Manager {
 }
 
 impl Manager {
-    
     pub fn new(log_io: File, log_file_path: PathBuf) -> Self {
         Manager {
             file_map: HashMap::new(),
@@ -103,7 +102,12 @@ impl Manager {
         (pages_len as u32, offset)
     }
 
-    pub fn write_page(&mut self, file_id: u64, page_id: u32, page_data: &[u8]) -> Result<(), String> {
+    pub fn write_page(
+        &mut self,
+        file_id: u64,
+        page_id: u32,
+        page_data: &[u8],
+    ) -> Result<(), String> {
         let file_meta = self
             .files
             .get_mut(&file_id)
@@ -156,7 +160,7 @@ impl Manager {
         &mut self,
         file_id: u64,
         page_id: u32,
-        mut page_data: &mut [u8],
+        page_data: &mut [u8],
     ) -> Result<(), String> {
         let file_meta = self
             .files
@@ -230,8 +234,6 @@ impl Manager {
         }
     }
 
-
-
     // Mayber these should not be functions of the disk manager
     // WAL
     pub fn open_log() -> (File, PathBuf) {
@@ -251,7 +253,7 @@ impl Manager {
 
         (log_file, log_file_path)
     }
-    
+
     pub fn create_db_file(&mut self) -> Result<(u64, PathBuf), i8> {
         std::fs::create_dir_all("geodeData/base").unwrap();
 
@@ -294,8 +296,8 @@ pub mod test {
         path::PathBuf,
     };
 
-    use crate::storage::page::page_constants::PAGE_SIZE;
     use super::Manager;
+    use crate::storage::page::page_constants::PAGE_SIZE;
 
     #[test]
     fn db_io_test() {
@@ -310,13 +312,11 @@ pub mod test {
 
         let (file_id, _) = manager.create_db_file().expect("File made");
 
-        
         let (page_id, _) = manager.allocate_page(file_id);
         manager.write_page(file_id, page_id, &page_data).unwrap();
         manager
             .read_page(file_id, page_id, &mut page_buffer)
             .expect("Failed to read page");
-
 
         assert_eq!(page_data, page_buffer, "Page read mismatch!");
     }
