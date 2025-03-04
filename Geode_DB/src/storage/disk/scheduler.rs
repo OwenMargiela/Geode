@@ -31,29 +31,24 @@ impl IoStatus {
     }
 }
 
-struct IoFuture {
-    flag: Arc<AtomicU8>,
-    waker: Arc<Mutex<Option<Waker>>>,
+pub struct IoFuture {
+    pub flag: Arc<AtomicU8>,
+    pub waker: Arc<Mutex<Option<Waker>>>,
 }
 
 impl Future for IoFuture {
     type Output = ();
 
     fn poll(
-        mut self: std::pin::Pin<&mut Self>,
+        self: std::pin::Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
     ) -> Poll<Self::Output> {
         match IoStatus::from_u8(self.flag.load(Ordering::Acquire)) {
             IoStatus::Success | IoStatus::WriteError | IoStatus::ReadError => {
-                println!("Ready....");
-                println!("{:?}", self.flag);
                 Poll::Ready(()) // Indicating completion
             }
 
             IoStatus::Pending => {
-                println!("polling....");
-                println!("{:?}", self.flag);
-
                 {
                     let mut waker_guard = self.waker.lock().unwrap();
                     *waker_guard = Some(cx.waker().clone());
@@ -65,44 +60,44 @@ impl Future for IoFuture {
     }
 }
 
-enum DiskData {
+pub enum DiskData {
     Write(Option<Box<[u8]>>),
     Read(Option<Arc<Mutex<Box<[u8]>>>>),
 }
 
 // Struct representing a request to perform disk I/O.
-struct DiskRequest {
+pub struct DiskRequest {
     // Flag indicating whether the request is a write or a read.
-    is_write: bool,
+    pub is_write: bool,
 
-    //Data buffer for writes, or shared reference to buffer for reads.
-    data: DiskData,
+    // Data buffer for writes, or shared reference to buffer for reads.
+    pub data: DiskData,
 
-    //ID of the page being read from / written to disk.
-    page_id: u32,
+    // ID of the page being read from / written to disk.
+    pub page_id: u32,
 
-    //ID of the file being read from / written to disk.
-    file_id: u64,
+    // ID of the file being read from / written to disk.
+    pub file_id: u64,
 
-    //A future to signal to the request issuer when the request has been completed.
-    done_flag: Arc<AtomicU8>,
-    waker: Arc<Mutex<Option<Waker>>>,
+    // A future to signal to the request issuer when the request has been completed.
+    pub done_flag: Arc<AtomicU8>,
+    pub waker: Arc<Mutex<Option<Waker>>>,
 }
 
-//Struct for scheduling disk I/O operations asynchronously.
+// Struct for scheduling disk I/O operations asynchronously.
 
-struct DiskScheduler {
+pub struct DiskScheduler {
     manager: Arc<Mutex<Manager>>,
     shared_queue: (Sender<DiskRequest>, Option<Receiver<DiskRequest>>),
 }
 
 impl DiskScheduler {
-    pub fn new() -> Self {
-        let (log_file, log_file_path) = Manager::open_log();
+    pub fn new(manager: Arc<Mutex<Manager>>) -> Self {
+        // let (log_file, log_file_path) = Manager::open_log();
         let (tx, rx) = mpsc::channel();
 
         let mut scheduler = Self {
-            manager: Arc::new(Mutex::new(Manager::new(log_file, log_file_path))),
+            manager: manager,
             shared_queue: (tx, Some(rx)),
         };
 
@@ -116,19 +111,15 @@ impl DiskScheduler {
 
         std::thread::spawn(move || loop {
             while let Ok(request) = rx.recv() {
-                println!("Processing page ID: {}", request.page_id);
-
                 let mut manager_guard = manager.lock().unwrap();
 
-                //              Attempt to perform the I/O operation.
-                //            Any failure should update the `done_flag` but should not crash the worker thread.
+                // Attempt to perform the I/O operation.
+                // Any failure should update the `done_flag` but should not crash the worker thread.
 
                 if request.is_write {
-                    println!("Writing");
                     if let DiskData::Write(Some(data)) = request.data {
                         match manager_guard.write_page(request.file_id, request.page_id, &data) {
                             Ok(_) => {
-                                println!("Storing");
                                 request
                                     .done_flag
                                     .store(IoStatus::Success as u8, Ordering::Release);
@@ -137,13 +128,8 @@ impl DiskScheduler {
                                 .done_flag
                                 .store(IoStatus::WriteError as u8, Ordering::Release),
                         };
-
-                        if let Some(waker) = request.waker.lock().unwrap().take() {
-                            waker.wake();
-                        }
                     }
                 } else {
-                    println!("Reading");
                     if let DiskData::Read(Some(buffer)) = &request.data {
                         let mut buffer_lock = buffer.lock().unwrap();
                         match manager_guard.read_page(
@@ -158,17 +144,16 @@ impl DiskScheduler {
                                 .done_flag
                                 .store(IoStatus::ReadError as u8, Ordering::Release),
                         };
-
-                        if let Some(waker) = request.waker.lock().unwrap().take() {
-                            waker.wake();
-                        }
                     }
+                }
+                if let Some(waker) = request.waker.lock().unwrap().take() {
+                    waker.wake();
                 }
             }
         });
     }
 
-    //Creates a future to track the status of a disk request.
+    // Creates a future to track the status of a disk request.
 
     pub fn create_future(&self) -> IoFuture {
         IoFuture {
@@ -178,12 +163,14 @@ impl DiskScheduler {
         }
     }
 
-    //Schedules a disk request for processing.
+    // Schedules a disk request for processing.
 
     pub fn schedule(&self, request: DiskRequest) {
         let tx = &self.shared_queue.0;
         tx.send(request).expect("Failed to send disk request");
     }
+
+    
 }
 
 #[cfg(test)]
@@ -197,8 +184,9 @@ pub mod test {
     #[tokio::main]
     #[test]
     async fn scheduler_test() {
-        println!("Begin");
-        let scheduler = DiskScheduler::new();
+        let (log_file, log_file_path) = Manager::open_log();
+        let manager = Arc::new(Mutex::new(Manager::new(log_file, log_file_path)));
+        let scheduler = DiskScheduler::new(Arc::clone(&manager));
         let future_one = scheduler.create_future();
 
         let (file_id, _) = scheduler
@@ -213,7 +201,7 @@ pub mod test {
         let (page_id, _) = gurad.allocate_page(file_id);
         drop(gurad);
 
-        // **Write Request**
+        // Write Request
         let data = [1; PAGE_SIZE];
         let page_data = Manager::aligned_buffer(&data);
 
@@ -228,7 +216,7 @@ pub mod test {
 
         scheduler.schedule(request);
 
-        // **Read Request**
+        // Read Request
         let future_two = scheduler.create_future();
         let page_buffer = Arc::new(Mutex::new(Manager::aligned_buffer(&vec![0; PAGE_SIZE])));
 
@@ -243,15 +231,10 @@ pub mod test {
 
         scheduler.schedule(request);
 
-        println!("Waiting for write future...");
         future_one.await;
-        println!("Write done!");
-
-        println!("Waiting for read future...");
         future_two.await;
-        println!("Read done!");
 
-        // **Verify Read & Write**
+        // Verify Read &Write
         let read_data = page_buffer.lock().unwrap();
 
         assert_eq!(&**read_data, &data, "Page read mismatch!");

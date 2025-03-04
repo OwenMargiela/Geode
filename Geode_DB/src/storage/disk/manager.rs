@@ -46,7 +46,7 @@ struct FileMetadata {
 pub struct Manager {
     // Mapping of inode numbers to file paths
     // Might be replaced by a table within the system catalogue
-    file_map: HashMap<u64, PathBuf>,
+    // file_map: HashMap<u64, PathBuf>,
     // Pool of open file descriptors
     file_descriptors: FdPool,          // File ID → File Descriptor Pool
     files: HashMap<u64, FileMetadata>, // File ID → File Metadata (Pages & Free Slots)
@@ -67,7 +67,7 @@ pub struct Manager {
 impl Manager {
     pub fn new(log_io: File, log_file_path: PathBuf) -> Self {
         Manager {
-            file_map: HashMap::new(),
+            // file_map: HashMap::new(),
             file_descriptors: FdPool::new(NUMBER_OF_ENTRIES, K_TH_VALUE),
             files: HashMap::new(),
             flush_logs: Arc::new(AtomicBool::new(false)),
@@ -272,7 +272,7 @@ impl Manager {
             .map_err(|_| -1)?;
 
         let file_ino = self.file_descriptors.set(new_file).0.ok_or(-1)?;
-        self.file_map.insert(file_ino, path.to_path_buf());
+        // self.file_map.insert(file_ino, path.to_path_buf());
         self.files.insert(
             file_ino,
             FileMetadata {

@@ -43,7 +43,9 @@ impl LRUKNode {
     fn get_last_entry(&self) -> &usize {
         self.history.last().expect("Empty History")
     }
+
 }
+
 
 pub struct LRUKReplacer<ID: Eq + Hash + Copy> {
     node_store: LinkedHashMap<ID, LRUKNode>,
