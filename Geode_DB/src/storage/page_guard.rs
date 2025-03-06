@@ -1,7 +1,7 @@
 use std::sync::{atomic::Ordering, Arc, Mutex, RwLockReadGuard, RwLockWriteGuard};
 
 use crate::{
-    buffer::buffer_pool_manager::{BufferPoolManager, SharedFrameHeader},
+    buffer::buffer_pool_manager::{BufferPoolManager, FrameHeader},
     utils::replacer::{LRUKReplacer, Replacer},
 };
 
@@ -30,51 +30,52 @@ impl<'a> PageGuard<'a> {
     }
 }
 pub struct WriteGuard<'a> {
-    frame: RwLockWriteGuard<'a, SharedFrameHeader>,
-    bpm_latch: Arc<Mutex<&'a BufferPoolManager>>,
+    pub frame: RwLockWriteGuard<'a, FrameHeader>,
     page_id: u32,
     replacer: Arc<Mutex<LRUKReplacer<u32>>>,
-    scheduler: Arc<Mutex<DiskScheduler>>,
     is_valid: bool,
 }
 
 impl<'a> WriteGuard<'a> {
     pub fn new(
         page_id: u32,
-        frame: RwLockWriteGuard<'a, SharedFrameHeader>,
+        frame: RwLockWriteGuard<'a, FrameHeader>,
         replacer: Arc<Mutex<LRUKReplacer<u32>>>,
-        sceduler: Arc<Mutex<DiskScheduler>>,
-        bpm_latch: Arc<Mutex<&'a BufferPoolManager>>,
     ) -> Self {
         frame.pin_count.fetch_add(1, Ordering::Relaxed);
 
         let mut replacer_guard = replacer.try_lock().unwrap();
+        dbg!("Aqquired replacer guard");
         replacer_guard.record_access(frame.frame_id.clone());
         replacer_guard.set_evictable(frame.frame_id, false);
         drop(replacer_guard);
+        dbg!("Dropped replacer guard");
 
+        dbg!("Aqquired write guard");
         Self {
-            bpm_latch,
             frame,
             is_valid: false,
             page_id,
             replacer,
-            scheduler: sceduler,
+
         }
     }
 }
 
 impl<'a> Drop for WriteGuard<'a> {
     fn drop(&mut self) {
+        dbg!("Dropping write guard");
         self.frame.pin_count.fetch_sub(1, Ordering::Release);
         let mut replacer_guard = self.replacer.lock().unwrap();
         replacer_guard.set_evictable(self.frame.frame_id, true);
+
+        
     }
 }
 
 pub struct ReadGuard<'a> {
     page_id: u32,
-    frame: Arc<RwLockReadGuard<'a, SharedFrameHeader>>,
+    pub frame: RwLockReadGuard<'a, FrameHeader>,
     replacer: Arc<Mutex<LRUKReplacer<u32>>>, // Why do we need you actually?
     scheduler: Arc<Mutex<DiskScheduler>>,
     is_valid: bool,
@@ -84,14 +85,14 @@ pub struct ReadGuard<'a> {
 impl<'a> ReadGuard<'a> {
     pub fn new(
         page_id: u32,
-        frame: Arc<RwLockReadGuard<'a, SharedFrameHeader>>,
+        frame: RwLockReadGuard<'a, FrameHeader>,
         replacer: Arc<Mutex<LRUKReplacer<u32>>>,
         scheduler: Arc<Mutex<DiskScheduler>>,
         bpm_latch: Arc<Mutex<&'a BufferPoolManager>>,
     ) -> Self {
         frame.pin_count.fetch_add(1, Ordering::Relaxed);
 
-        let mut replacer_guard = replacer.try_lock().unwrap();
+        let mut replacer_guard = replacer.lock().unwrap();
         replacer_guard.record_access(frame.frame_id.clone());
         replacer_guard.set_evictable(frame.frame_id, false);
         drop(replacer_guard);
@@ -105,11 +106,16 @@ impl<'a> ReadGuard<'a> {
             scheduler,
         }
     }
+
+    pub fn get_data(&self) -> &Box<[u8]> {
+        &self.frame.data
+    }
 }
 
 impl<'a> Drop for ReadGuard<'a> {
     fn drop(&mut self) {
         self.frame.pin_count.fetch_sub(1, Ordering::Release);
+        print!("Dropping");
 
         if self.frame.pin_count.load(Ordering::SeqCst) == 0 {
             let mut replacer_guard = self.replacer.lock().unwrap();
