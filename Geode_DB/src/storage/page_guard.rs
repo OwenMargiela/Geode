@@ -1,11 +1,11 @@
-use std::sync::{atomic::Ordering, Arc, Mutex, RwLockReadGuard, RwLockWriteGuard};
+use std::sync::{atomic::Ordering, Arc, Mutex, RwLock, RwLockReadGuard, RwLockWriteGuard};
+
+use hashlink::LinkedHashMap;
 
 use crate::{
-    buffer::buffer_pool_manager::{BufferPoolManager, FrameHeader},
+    buffer::buffer_pool_manager::{AccessType, FrameHeader, FrameId},
     utils::replacer::{LRUKReplacer, Replacer},
 };
-
-use super::disk::scheduler::DiskScheduler;
 
 pub enum PageGuard<'a> {
     WriteGuard(WriteGuard<'a>),
@@ -29,97 +29,119 @@ impl<'a> PageGuard<'a> {
         }
     }
 }
-pub struct WriteGuard<'a> {
-    pub frame: RwLockWriteGuard<'a, FrameHeader>,
-    page_id: u32,
-    replacer: Arc<Mutex<LRUKReplacer<u32>>>,
+
+pub struct FrameGuard<'a> {
+    frame_id: u32,
+    guard: RwLockReadGuard<'a, LinkedHashMap<u32, Option<RwLock<FrameHeader>>>>,
+    on_drop: Box<dyn Fn(u32, bool) + 'a>,
     is_valid: bool,
 }
 
-impl<'a> WriteGuard<'a> {
+impl<'a> FrameGuard<'a> {
     pub fn new(
-        page_id: u32,
-        frame: RwLockWriteGuard<'a, FrameHeader>,
+        frame_id: u32,
         replacer: Arc<Mutex<LRUKReplacer<u32>>>,
-    ) -> Self {
-        frame.pin_count.fetch_add(1, Ordering::Relaxed);
+        guard: RwLockReadGuard<'a, LinkedHashMap<u32, Option<RwLock<FrameHeader>>>>,
+        access_type: AccessType,
+    ) -> PageGuard<'a> {
+        {
+            let frame_guard = guard.get(&frame_id).unwrap().as_ref().expect("Valid frame");
+            let frame = frame_guard.write().unwrap();
+            frame.pin_count.fetch_add(1, Ordering::Relaxed);
+        }
 
-        let mut replacer_guard = replacer.try_lock().unwrap();
-        dbg!("Aqquired replacer guard");
-        replacer_guard.record_access(frame.frame_id.clone());
-        replacer_guard.set_evictable(frame.frame_id, false);
-        drop(replacer_guard);
-        dbg!("Dropped replacer guard");
+        let on_drop = Box::new(move |frame_id: u32, evictabilility: bool| {
+            let mut replacer_guard = replacer.lock().unwrap();
+            dbg!("Aqquired replacer guard");
 
-        dbg!("Aqquired write guard");
-        Self {
-            frame,
+            replacer_guard.record_access(frame_id);
+            replacer_guard.set_evictable(frame_id, evictabilility);
+        });
+
+        on_drop(frame_id, false);
+
+        let frame = FrameGuard {
+            frame_id,
+            guard,
             is_valid: false,
-            page_id,
-            replacer,
+            on_drop,
+        };
 
+        match access_type {
+            AccessType::Write => PageGuard::WriteGuard(WriteGuard::new(frame)),
+            AccessType::Read => PageGuard::ReadGuard(ReadGuard::new(frame)),
         }
     }
 }
 
-impl<'a> Drop for WriteGuard<'a> {
+impl<'a> Drop for FrameGuard<'a> {
     fn drop(&mut self) {
         dbg!("Dropping write guard");
-        self.frame.pin_count.fetch_sub(1, Ordering::Release);
-        let mut replacer_guard = self.replacer.lock().unwrap();
-        replacer_guard.set_evictable(self.frame.frame_id, true);
 
-        
+        let frame_guard = self
+            .guard
+            .get(&self.frame_id)
+            .unwrap()
+            .as_ref()
+            .expect("Valid frame");
+
+        let frame = frame_guard.write().unwrap();
+        frame.pin_count.fetch_sub(1, Ordering::Release);
+
+        (self.on_drop)(self.frame_id, true);
+    }
+}
+
+pub struct WriteGuard<'a> {
+    _frame_id: FrameId,
+    _frame: FrameGuard<'a>,
+}
+
+impl<'a> WriteGuard<'a> {
+    pub fn new(_frame: FrameGuard<'a>) -> Self {
+        let _frame_id = _frame.frame_id;
+
+        Self { _frame, _frame_id }
+    }
+
+    pub fn get_frame(&self) -> RwLockWriteGuard<'_, FrameHeader> {
+        let frame_guard = self
+            ._frame
+            .guard
+            .get(&self._frame_id)
+            .unwrap()
+            .as_ref()
+            .expect("Valid frame");
+
+        let frame = frame_guard.write().unwrap();
+        frame
     }
 }
 
 pub struct ReadGuard<'a> {
-    page_id: u32,
-    pub frame: RwLockReadGuard<'a, FrameHeader>,
-    replacer: Arc<Mutex<LRUKReplacer<u32>>>, // Why do we need you actually?
-    scheduler: Arc<Mutex<DiskScheduler>>,
-    is_valid: bool,
-    bpm_latch: Arc<Mutex<&'a BufferPoolManager>>,
+    _frame_id: FrameId,
+    _frame: FrameGuard<'a>,
 }
 
 impl<'a> ReadGuard<'a> {
-    pub fn new(
-        page_id: u32,
-        frame: RwLockReadGuard<'a, FrameHeader>,
-        replacer: Arc<Mutex<LRUKReplacer<u32>>>,
-        scheduler: Arc<Mutex<DiskScheduler>>,
-        bpm_latch: Arc<Mutex<&'a BufferPoolManager>>,
-    ) -> Self {
-        frame.pin_count.fetch_add(1, Ordering::Relaxed);
+    pub fn new(_frame: FrameGuard<'a>) -> Self {
+        let _frame_id = _frame.frame_id;
 
-        let mut replacer_guard = replacer.lock().unwrap();
-        replacer_guard.record_access(frame.frame_id.clone());
-        replacer_guard.set_evictable(frame.frame_id, false);
-        drop(replacer_guard);
-
-        Self {
-            bpm_latch,
-            frame,
-            is_valid: false,
-            page_id,
-            replacer,
-            scheduler,
-        }
+        Self { _frame, _frame_id }
     }
 
-    pub fn get_data(&self) -> &Box<[u8]> {
-        &self.frame.data
-    }
-}
+    pub fn get_frame(&self) -> RwLockReadGuard<'_, FrameHeader> {
+        let frame_guard = self
+            ._frame
+            .guard
+            .get(&self._frame_id)
+            .unwrap()
+            .as_ref()
+            .expect("Valid frame");
 
-impl<'a> Drop for ReadGuard<'a> {
-    fn drop(&mut self) {
-        self.frame.pin_count.fetch_sub(1, Ordering::Release);
-        print!("Dropping");
-
-        if self.frame.pin_count.load(Ordering::SeqCst) == 0 {
-            let mut replacer_guard = self.replacer.lock().unwrap();
-            replacer_guard.set_evictable(self.frame.frame_id, true);
-        }
+        let frame = frame_guard.read().unwrap();
+        frame
     }
+
+    
 }

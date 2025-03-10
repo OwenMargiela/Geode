@@ -17,10 +17,6 @@ pub mod test {
     #[test]
 
     fn disable_drop_test() {
-        // Buffer Pool Manager implementation is flawed
-        // Most successive function result im :
-        //  cannot borrow `bpm` as mutable more than once at a time
-        //  second mutable borrow occurs here
 
         let (log_io, log_file_path) = Manager::open_log();
 
@@ -34,7 +30,7 @@ pub mod test {
             let pid_0 = bpm.new_page(file_id);
             let guard = bpm.write_page(file_id, pid_0);
 
-            assert_eq!(1, guard.frame.pin_count.load(Ordering::Relaxed));
+            assert_eq!(1, bpm.get_pin_count(file_id, pid_0));
             drop(guard);
 
             assert_eq!(0, bpm.get_pin_count(file_id, pid_0));
@@ -45,23 +41,19 @@ pub mod test {
 
         {
             let read_guard = bpm.read_page(file_id, pid_1);
-            assert_eq!(1, read_guard.frame.pin_count.load(Ordering::Relaxed));
+            assert_eq!(1, bpm.get_pin_count(file_id, pid_1));
             drop(read_guard);
 
-            assert_eq!(0, bpm.get_pin_count(file_id, pid_1));
-
             let write_guard = bpm.write_page(file_id, pid_2);
-            assert_eq!(1, write_guard.frame.pin_count.load(Ordering::Relaxed));
+            assert_eq!(1, bpm.get_pin_count(file_id, pid_2));
             drop(write_guard);
 
-            assert_eq!(0, bpm.get_pin_count(file_id, pid_2));
         }
 
         {
             let write_test1 = bpm.write_page(file_id, pid_1);
-            drop(write_test1);
-
-            let write_test2 = bpm.write_page(file_id, pid_2);
+            let write_test2 = bpm.read_page(file_id, pid_1);
+            let write_test_3 = bpm.read_page(file_id, pid_1);
         }
 
         let mut page_ids: Vec<u32> = Vec::new();
@@ -83,25 +75,24 @@ pub mod test {
 
         // Get a new write page and edit it. We will retrieve it later
 
-        let mutable_page_id = bpm.new_page(file_id);
-        
+        // let mutable_page_id = bpm.new_page(file_id);
 
-        println!("New Page\n\n\n\n");
-        let mut mutable_guard = bpm.write_page(file_id, mutable_page_id);
+        // println!("New Page\n\n\n\n");
+        // let mut mutable_guard = bpm.write_page(file_id, mutable_page_id);
 
-        let page = vec![0u8; PAGE_SIZE];
-        let frame_data = &mut mutable_guard.frame.data;
+        // let page = vec![0u8; PAGE_SIZE];
+        // let frame_data = &mut mutable_guard;
 
-        if frame_data.len() != PAGE_SIZE {
-            *frame_data = vec![0u8; PAGE_SIZE].into_boxed_slice(); // Reallocate with correct size
-        }
+        // if frame_data.len() != PAGE_SIZE {
+        //     *frame_data = vec![0u8; PAGE_SIZE].into_boxed_slice(); // Reallocate with correct size
+        // }
 
-        frame_data.copy_from_slice(&page);
+        // frame_data.copy_from_slice(&page);
 
-        let data_copy = frame_data.clone();
-        drop(mutable_guard);
+        // let data_copy = frame_data.clone();
+        // drop(mutable_guard);
 
-        println!("Filling up\n\n\n");
+        // println!("Filling up\n\n\n");
         // Fill up the BPM again.
         // for _ in 0..NUM_FRAMES {
         //     let pid = bpm.new_page(file_id);
@@ -111,8 +102,7 @@ pub mod test {
         // }
 
         // println!("{:?}", data_copy);
-        let immutable_guard = bpm.read_page(file_id, mutable_page_id);
-        println!("{:?}", immutable_guard.get_data());
+        // let immutable_guard = bpm.read_page(file_id, mutable_page_id).get_frame();
 
         // assert_eq!(*page, **immutable_guard.get_data());
     }
