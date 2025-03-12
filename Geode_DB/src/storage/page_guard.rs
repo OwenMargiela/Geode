@@ -56,6 +56,8 @@ impl<'a> FrameGuard<'a> {
 
             replacer_guard.record_access(frame_id);
             replacer_guard.set_evictable(frame_id, evictabilility);
+
+            drop(replacer_guard);
         });
 
         on_drop(frame_id, false);
@@ -85,8 +87,9 @@ impl<'a> Drop for FrameGuard<'a> {
             .as_ref()
             .expect("Valid frame");
 
-        let frame = frame_guard.write().unwrap();
+        let mut frame = frame_guard.write().unwrap();
         frame.pin_count.fetch_sub(1, Ordering::Release);
+        frame.is_dirty = false.into();
 
         (self.on_drop)(self.frame_id, true);
     }

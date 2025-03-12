@@ -3,7 +3,6 @@ pub mod test {
     use std::{
         fs::{remove_dir_all, remove_file},
         path::PathBuf,
-        sync::atomic::Ordering,
     };
 
     use crate::{
@@ -17,7 +16,6 @@ pub mod test {
     #[test]
 
     fn disable_drop_test() {
-
         let (log_io, log_file_path) = Manager::open_log();
 
         let manager = Manager::new(log_io, log_file_path);
@@ -47,13 +45,12 @@ pub mod test {
             let write_guard = bpm.write_page(file_id, pid_2);
             assert_eq!(1, bpm.get_pin_count(file_id, pid_2));
             drop(write_guard);
-
         }
 
         {
-            let write_test1 = bpm.write_page(file_id, pid_1);
-            let write_test2 = bpm.read_page(file_id, pid_1);
-            let write_test_3 = bpm.read_page(file_id, pid_1);
+            let _write_test1 = bpm.write_page(file_id, pid_1);
+            let _write_test2 = bpm.read_page(file_id, pid_1);
+            let _write_test_3 = bpm.read_page(file_id, pid_1);
         }
 
         let mut page_ids: Vec<u32> = Vec::new();
@@ -75,36 +72,52 @@ pub mod test {
 
         // Get a new write page and edit it. We will retrieve it later
 
-        // let mutable_page_id = bpm.new_page(file_id);
+        let mutable_page_id = bpm.new_page(file_id);
+        println!("Mutable Page id  = {}", mutable_page_id);
 
-        // println!("New Page\n\n\n\n");
-        // let mut mutable_guard = bpm.write_page(file_id, mutable_page_id);
+        {
+            // Writing Data
+            {
+                let mutable_guard = bpm.write_page(file_id, mutable_page_id);
+                let frame_data = &mut mutable_guard.get_frame().data;
 
-        // let page = vec![0u8; PAGE_SIZE];
-        // let frame_data = &mut mutable_guard;
+                if frame_data.len() != PAGE_SIZE {
+                    *frame_data = vec![0u8; PAGE_SIZE].into_boxed_slice(); // Reallocate with correct size
+                }
 
-        // if frame_data.len() != PAGE_SIZE {
-        //     *frame_data = vec![0u8; PAGE_SIZE].into_boxed_slice(); // Reallocate with correct size
-        // }
+                let new_page_data = vec![1; PAGE_SIZE].into_boxed_slice();
 
-        // frame_data.copy_from_slice(&page);
+                frame_data.copy_from_slice(&new_page_data);
+            }
+        }
 
-        // let data_copy = frame_data.clone();
-        // drop(mutable_guard);
+        {
+            // Reading Data
+            let mutable_guard = bpm.read_page(file_id, mutable_page_id);
+            let frame_data = &mutable_guard.get_frame().data;
 
-        // println!("Filling up\n\n\n");
+            assert_eq!(frame_data, &vec![1; PAGE_SIZE].into_boxed_slice());
+        }
+
+        // Data persistence check
+
         // Fill up the BPM again.
-        // for _ in 0..NUM_FRAMES {
-        //     let pid = bpm.new_page(file_id);
-        //     let _ = bpm.write_page(file_id, pid);
+        for _ in 0..NUM_FRAMES {
+            let pid = bpm.new_page(file_id);
+            let _ = bpm.write_page(file_id, pid);
 
-        //     page_ids.push(pid);
-        // }
+            page_ids.push(pid);
+        }
 
-        // println!("{:?}", data_copy);
-        // let immutable_guard = bpm.read_page(file_id, mutable_page_id).get_frame();
+        println!("Mutable Page id  = {}", mutable_page_id);
 
-        // assert_eq!(*page, **immutable_guard.get_data());
+        {
+            let immutable_guard = bpm.read_page(file_id, mutable_page_id);
+            assert_eq!(
+                &immutable_guard.get_frame().data,
+                &vec![1; PAGE_SIZE].into_boxed_slice()
+            );
+        }
     }
 
     #[test]

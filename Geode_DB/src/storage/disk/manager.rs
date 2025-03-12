@@ -319,6 +319,7 @@ pub mod test {
             .expect("Failed to read page");
 
         assert_eq!(page_data, page_buffer, "Page read mismatch!");
+        println!("{:?}", page_buffer);
     }
 
     #[test]

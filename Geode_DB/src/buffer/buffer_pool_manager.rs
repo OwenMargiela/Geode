@@ -29,10 +29,14 @@ pub struct FrameHeader {
     pub pin_count: AtomicU32,
     pub writing_to: AtomicBool,
     pub is_dirty: AtomicBool,
+    pub page_id: PageId,
+    pub file_id: FileId,
 
     pub data: Box<[u8]>,
 }
 
+// Tracks page allocations in a File
+// Maps every page to possible allocated frame
 type FilePageMap = HashMap<PageId, Option<FrameId>>;
 
 pub struct BufferPoolManager {
@@ -53,7 +57,7 @@ pub struct BufferPoolManager {
     // A pointer to the disk scheduler. Shared with the page guards for flushing.
     disk_scheduler: Arc<Mutex<DiskScheduler>>,
 
-    manager: Arc<Mutex<Manager>>,
+    pub manager: Arc<Mutex<Manager>>,
 }
 pub struct BufferPoolHandle {
     inner: Arc<BufferPoolManager>,
@@ -76,6 +80,9 @@ impl BufferPoolManager {
 
         for i in 0..num_frames {
             frames.insert(i as u32, None);
+
+            // The maximum amount of frames are all allocated at once
+
             free_frames.push_back(i as u32);
         }
 
@@ -91,6 +98,8 @@ impl BufferPoolManager {
         }
     }
 
+    // Allocates a new File on disk
+
     pub fn allocate_file(&mut self) -> FileId {
         let manager = &self.manager;
         let mut manager_guard = manager.lock().unwrap();
@@ -101,6 +110,7 @@ impl BufferPoolManager {
 
         {
             let mut file_map_guard = self.file_page_map.write().unwrap();
+
             file_map_guard.insert(file_id, HashMap::new());
         }
 
@@ -116,15 +126,30 @@ impl BufferPoolManager {
         dbg!("Aqquired manager guard used to create new page");
 
         let (page_id, _) = manager_guard.allocate_page(file_id);
-        self.next_page_id.fetch_add(1, Ordering::Relaxed);
-
         dbg!("Dropping manager guard used to create new page");
-        drop(manager_guard);
+
+        self.next_page_id.fetch_add(1, Ordering::Relaxed);
 
         let mut file_page_map_guard = self.file_page_map.write().unwrap();
 
-        // Inititial frame_id for pages
+        // Inititial frame_id for page
         let page_frame_map = file_page_map_guard.get_mut(&file_id).unwrap();
+
+        // Inittialize Default Page
+        {
+            println!("Initialize File {} Page {}", file_id, page_id);
+
+            let buffer: Box<[u8]> = Box::new([0; PAGE_SIZE]);
+            let mut page_buffer = Manager::aligned_buffer(&buffer);
+            manager_guard
+                .write_page(file_id, page_id, &mut page_buffer)
+                .unwrap();
+        }
+        
+        drop(manager_guard);
+
+        // Page does not an allocated frame
+        // Therefore, value is initialized to zero
         page_frame_map.insert(page_id, None);
         page_id
     }
@@ -172,35 +197,6 @@ impl BufferPoolManager {
         false
     }
 
-    pub fn flush_page_unsafe(&self, file_id: u64, page_id: PageId, frame_data: &[u8]) -> bool {
-        // Does file and page exist ?
-
-        let exists = self
-            .file_page_map
-            .try_read()
-            .unwrap()
-            .get(&file_id) // Error if file has not beeen allocated
-            .and_then(|file_map| file_map.get(&page_id)) // Error if page as not allocated
-            .is_some();
-
-        if exists {
-            return false;
-        }
-
-        {
-            let mut manager_guard = self.manager.lock().unwrap();
-
-            if manager_guard
-                .write_page(file_id, page_id, frame_data)
-                .is_ok()
-            {
-                return true;
-            }
-        }
-
-        false
-    }
-
     fn check_page(
         &self,
         file_id: u64,
@@ -212,93 +208,108 @@ impl BufferPoolManager {
         match access_type {
             AccessType::Read => {
                 dbg!("Reading");
+                if page_id == 13 {
+                    println!("\n\n\n Reading page ID {} \n\n\n", page_id);
+                }
             }
             _ => {}
         }
+        let frame_id: Option<u32>;
 
-        let file_map_guard = self.file_page_map.read().unwrap();
-        let file_map = file_map_guard.get(&file_id)?; // Error if file has not been allocated
-        let frame_id = *file_map.get(&page_id).unwrap();
+        {
+            let file_map_guard = self.file_page_map.read().unwrap();
+            let file_map = file_map_guard.get(&file_id)?; // Error if file has not been allocated
+            frame_id = *file_map.get(&page_id).unwrap();
+        }
 
-        // Frame not initialized
-        // Page has not been given an allocated frame
-        // Page id not in memory
         if frame_id.is_none() {
-            drop(file_map_guard);
+            // Cases
             dbg!("Frame not initialized Page id not in memory");
 
+            // 1.
             // Free frames are available no eviction needed
+
             if let Some(frame_id) = self.free_frames.lock().unwrap().pop_front() {
                 dbg!("Free frames are available no eviction needed");
 
                 self.init_frame_data(file_id, page_id, frame_id);
-                let frame_guard = self.frames.read().unwrap();
-                let frame_option = frame_guard.get(&frame_id).unwrap();
-
-                // Construct page guard around the data then return it
-                // Edit the frames header's is_dirty flag
-                // It indicates whether or not the page's data has been modified
-
-                let frame_guard = frame_option.as_ref().unwrap();
-                let read_guard = frame_guard.read().unwrap();
-                let id = read_guard.frame_id;
-                drop(read_guard);
-
-                return Some(self.create_guard(id, access_type));
+                return Some(self.create_guard(frame_id, access_type));
             }
 
+            // 2.
             // Free frames are not available eviction needed
-            // The buffer pool is tasked with finding memory that it can use to bring in a page of memory,
-            // using the replacement algorithm you implemented previously to find candidate frames for eviction.
+            // The buffer pool is tasked with finding memory that it can use to bring
+            // in a page of memory, using the replacement algorithm you implemented
+            // previously to find candidate frames for eviction.
 
             dbg!("Free frames not available eviction needed");
-            let frame_id = {
+
+            let eviction_id = {
                 let mut replacer_guard = self.replacer.lock().unwrap();
                 replacer_guard.evict()? // Returns None as ther is no page to evict
             };
+            println!("Evicting {}", eviction_id);
+
+            // Data to be evicticted needs to be persisted on disk
+            // using the evict() function, obtain the frame_id and by extention the
+            // page_id as well as the file_id to find the location of persistence
 
             // Once the buffer pool has identified a frame for eviction, several I/O operations may be necessary
             // to bring in the page of data we want into the frame. Flush the data of the frame to evicted to disk
 
-            let frame = self
-                .frames
-                .try_write()
+            let mut frame_guard = self.frames.write().unwrap();
+
+            dbg!("Aqquired lock");
+
+            let frame = frame_guard
+                .get_mut(&eviction_id)
                 .unwrap()
-                .remove(&frame_id)
-                .unwrap()
-                .expect("Frame removed");
+                .as_ref()
+                .expect("Valid frame");
 
             // Flush page to disk if dirty
-            let page_guard = frame.write().unwrap();
-            let page_data = &page_guard.data;
-            self.flush_page_unsafe(file_id, page_id, &page_data);
-            drop(page_guard);
+            let evicted_page_guard = frame.write().unwrap();
+            let page_data = &evicted_page_guard.data;
+
+            {
+                let mut file_map_guard = self.file_page_map.write().unwrap();
+                let file_map = file_map_guard.get_mut(&evicted_page_guard.file_id)?;
+                file_map.insert(evicted_page_guard.page_id, None);
+            }
+
+            let res = self.flush_page_sync(
+                evicted_page_guard.file_id,
+                evicted_page_guard.page_id,
+                &page_data,
+            );
+
+            println!("Flush == {} ", res);
+
+            drop(evicted_page_guard);
+            drop(frame_guard);
 
             // Init new frame to be written to
-            let page_guard = frame.read().unwrap();
-            self.init_frame_data(file_id, page_id, page_guard.frame_id);
-            drop(page_guard);
+            // It now takes the ID of the evicted frame
+            self.init_frame_data(file_id, page_id, eviction_id);
 
             // Construct page guard around the data then return it
             // Edit the frames header's is_dirty flag
             // It indicates whether or not the page's data has been modified
 
-            return Some(self.create_guard(frame_id, access_type));
+            return Some(self.create_guard(eviction_id, access_type));
         }
         // Page has been allocated a frame
         // Page in memory
         else if let Some(frame_id) = frame_id {
-            drop(file_map_guard);
             if self.frames.read().unwrap().get(&frame_id).is_some() {
-                dbg!("Page has been allocated a frame\nPage in memory");
-                // Construct page guard around the data then return it
                 return Some(self.create_guard(frame_id, access_type));
             }
         }
+
         None
     }
 
-    pub async fn flush_page(&self, file_id: FileId, page_id: PageId, frame: &[u8]) -> bool {
+    pub fn flush_page_sync(&self, file_id: u64, page_id: PageId, frame_data: &[u8]) -> bool {
         // Does file and page exist ?
 
         let exists = self
@@ -309,7 +320,39 @@ impl BufferPoolManager {
             .and_then(|file_map| file_map.get(&page_id)) // Error if page as not allocated
             .is_some();
 
-        if exists {
+        if !exists {
+            println!("Does not exist");
+            return false;
+        }
+        println!("exists == {}", exists);
+
+        {
+            let mut manager_guard = self.manager.lock().unwrap();
+
+            let alingend_frame_data = Manager::aligned_buffer(frame_data);
+
+            if manager_guard
+                .write_page(file_id, page_id, &alingend_frame_data)
+                .is_ok()
+            {
+                return true;
+            }
+        }
+
+        false
+    }
+    pub async fn flush_page_async(&self, file_id: FileId, page_id: PageId, frame: &[u8]) -> bool {
+        // Does file and page exist ?
+
+        let exists = self
+            .file_page_map
+            .try_read()
+            .unwrap()
+            .get(&file_id) // Error if file has not beeen allocated
+            .and_then(|file_map| file_map.get(&page_id)) // Error if page as not allocated
+            .is_some();
+
+        if !exists {
             return false;
         }
 
@@ -318,7 +361,7 @@ impl BufferPoolManager {
 
         // Write Request
         let page_data = Manager::aligned_buffer(&frame);
-
+        println!("Writing data {:?}\n\n", page_data);
         let request = DiskRequest {
             data: DiskData::Write(Some(page_data)), // Move the buffer
             done_flag: Arc::clone(&future.flag),
@@ -338,21 +381,34 @@ impl BufferPoolManager {
 
     fn init_frame_data(&self, file_id: FileId, page_id: PageId, frame_id: FrameId) {
         // Read page data into memory
-        let mut manager = self.manager.lock().unwrap();
-        let mut page_buffer: Vec<u8> = Vec::with_capacity(PAGE_SIZE);
-        manager
-            .read_page(file_id, page_id, &mut page_buffer)
-            .unwrap();
 
-        drop(manager);
+        let mut frame_data = vec![0u8; PAGE_SIZE].into_boxed_slice();
+
+        {
+            let mut manager = self.manager.lock().unwrap();
+
+            println!("Reading File {} Page {}", file_id, page_id);
+
+            let buffer: Box<[u8]> = Box::new([0; PAGE_SIZE]);
+            let mut page_buffer = Manager::aligned_buffer(&buffer);
+            manager
+                .read_page(file_id, page_id, &mut page_buffer)
+                .unwrap();
+
+            if page_buffer.len() == PAGE_SIZE {
+                frame_data.copy_from_slice(&page_buffer);
+            }
+        }
 
         // initialize frame
         let frame = FrameHeader {
-            data: page_buffer.into(),
+            data: frame_data,
             frame_id,
             writing_to: AtomicBool::new(false),
             is_dirty: AtomicBool::new(false), // I forgot what dirty means. It means data on disk is not consistent with data in memory >_O
-            pin_count: AtomicU32::new(0),     //
+            pin_count: AtomicU32::new(0),
+            file_id,
+            page_id,
         };
 
         {
@@ -422,114 +478,3 @@ impl BufferPoolManager {
         pin
     }
 }
-
-
-
-
-
-// pub fn delete_page(&self, file_id: FileId, page_id: PageId) -> bool {
-//     // Unwrap and error
-//     let mut page_frame_map_guard = self.file_page_map.write().unwrap();
-//     let page_frame_map = page_frame_map_guard.get_mut(&file_id).unwrap();
-
-//     let frame_id_option = page_frame_map.get(&page_id).unwrap().clone();
-
-//     if frame_id_option.is_none() {
-//         return false;
-//     }
-//     let frame_id = frame_id_option.unwrap();
-
-//     let mut frame_guard = self.frames.write().unwrap();
-//     let frame = frame_guard.get_mut(&frame_id).unwrap();
-
-//     // Is the frame for that page pinned
-//     if frame.as_ref().map_or(false, |frame| {
-//         frame.read().unwrap().pin_count.load(Ordering::Relaxed) > 0
-//     }) {
-//         drop(frame_guard);
-//         drop(page_frame_map_guard);
-//         return false;
-//     }
-
-//     if let Some(frame) = frame.take() {
-//         let mut manager_guard = self.manager.lock().unwrap();
-
-//         match manager_guard.delete_page(file_id, page_id) {
-//             Ok(_) => {
-//                 self.frames.try_write().unwrap().replace(frame_id, None);
-
-//                 // Page no longer has an associated Frame
-//                 page_frame_map.insert(page_id, None);
-
-//                 let frame_guard = frame.read().unwrap();
-//                 self.free_frames
-//                     .lock()
-//                     .unwrap()
-//                     .push_front(frame_guard.frame_id);
-//                 drop(frame_guard);
-
-//                 return true;
-//             }
-//             Err(err) => {
-//                 println!("{}", err);
-//                 self.frames
-//                     .try_write()
-//                     .unwrap()
-//                     .insert(frame_id, Some(frame));
-//                 return false;
-//             }
-//         }
-//     }
-//     false
-// }
-
-
-
-//     pub fn delete_page(&mut self, file_id: FileId, page_id: PageId) -> bool {
-//         // Unwrap and error
-//         let page_frame_map = self.file_page_map.get_mut(&file_id).unwrap();
-
-//         let frame_id_option = page_frame_map.get(&page_id).unwrap().clone();
-
-//         if frame_id_option.is_none() {
-//             return false;
-//         }
-//         let frame_id = frame_id_option.unwrap();
-
-//         let frame = self.frames.get_mut(&frame_id).unwrap();
-
-//         // Is the frame for that page pinned
-//         if frame.as_ref().map_or(false, |frame| {
-//             frame.read().unwrap().pin_count.load(Ordering::Relaxed) > 0
-//         }) {
-//             return false;
-//         }
-
-//         if let Some(frame) = frame.take() {
-//             let mut manager_guard = self.manager.lock().unwrap();
-
-//             match manager_guard.delete_page(file_id, page_id) {
-//                 Ok(_) => {
-//                     self.frames.replace(frame_id, None);
-
-//                     // Page no longer has an associated Frame
-//                     page_frame_map.insert(page_id, None);
-
-//                     let frame_guard = frame.read().unwrap();
-//                     self.free_frames.push_front(frame_guard.frame_id);
-//                     drop(frame_guard);
-
-//                     return true;
-//                 }
-//                 Err(err) => {
-//                     println!("{}", err);
-//                     self.frames.insert(frame_id, Some(frame));
-//                     return false;
-//                 }
-//             }
-//         }
-//         false
-//     }
-
-
-
