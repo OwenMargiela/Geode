@@ -1,0 +1,9 @@
+# Ignore Target directory
+target/
+
+# Ignore file storage
+geodeData/
+
+
+
+log_file_path.bin
