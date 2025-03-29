@@ -11,8 +11,8 @@ pub struct Key(pub [u8; 10]);
 #[derive(Clone, Eq, PartialEq, Debug)]
 // Page Number and Slot Index
 pub struct RowID {
-    page_id: [u8; 4],
-    slot_index: [u8; 4],
+    pub page_id: [u8; 4],
+    pub slot_index: [u8; 4],
 }
 
 #[derive(Clone, Eq, PartialEq, Debug)]
