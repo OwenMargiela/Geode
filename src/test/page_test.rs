@@ -3,8 +3,7 @@
 pub mod test {
     use std::{
         fs::{remove_dir_all, remove_file},
-        path::PathBuf,
-        sync::RwLock,
+        path::PathBuf
     };
 
     use crate::{
@@ -84,7 +83,7 @@ pub mod test {
                 let frame_data = &mut mutable_guard.get_frame().data;
 
                 if frame_data.len() != PAGE_SIZE {
-                    *frame_data = vec![0u8; PAGE_SIZE].into_boxed_slice(); // Reallocate with correct size
+                    *frame_data = [0u8; PAGE_SIZE]; // Reallocate with correct size
                 }
 
                 let new_page_data = vec![1; PAGE_SIZE].into_boxed_slice();
@@ -98,7 +97,7 @@ pub mod test {
             let mutable_guard = bpm.read_page(file_id, mutable_page_id);
             let frame_data = &mutable_guard.get_frame().data;
 
-            assert_eq!(frame_data, &vec![1; PAGE_SIZE].into_boxed_slice());
+            assert_eq!(frame_data, &[1; PAGE_SIZE]);
         }
 
         // Data persistence check
@@ -119,7 +118,7 @@ pub mod test {
             
             assert_eq!(
                 &immutable_guard.get_frame().data,
-                &vec![1; PAGE_SIZE].into_boxed_slice()
+                &[1; PAGE_SIZE]
             );
         }
     }

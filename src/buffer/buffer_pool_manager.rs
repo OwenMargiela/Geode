@@ -32,12 +32,13 @@ pub struct FrameHeader {
     pub page_id: PageId,
     pub file_id: FileId,
 
-    pub data: Box<[u8]>,
+    pub data: [u8;PAGE_SIZE],
 }
 
 // Tracks page allocations in a File
 // Maps every page to possible allocated frame
 type FilePageMap = HashMap<PageId, Option<FrameId>>;
+
 
 pub struct BufferPoolManager {
     num_frames: usize,
@@ -59,11 +60,6 @@ pub struct BufferPoolManager {
 
     pub manager: Arc<Mutex<Manager>>,
 }
-// pub struct BufferPoolHandle {
-//     inner: Arc<BufferPoolManager>,
-// }
-
-
 pub enum AccessType {
     Read,
     Write,
@@ -311,7 +307,7 @@ impl BufferPoolManager {
         None
     }
 
-    pub fn flush_page_sync(&self, file_id: u64, page_id: PageId, frame_data: &[u8]) -> bool {
+    pub fn flush_page_sync(&self, file_id: u64, page_id: PageId, frame_data: &[u8;PAGE_SIZE]) -> bool {
         // Does file and page exist ?
 
         let exists = self
@@ -384,7 +380,7 @@ impl BufferPoolManager {
     fn init_frame_data(&self, file_id: FileId, page_id: PageId, frame_id: FrameId) {
         // Read page data into memory
 
-        let mut frame_data = vec![0u8; PAGE_SIZE].into_boxed_slice();
+        let mut frame_data = [0u8; PAGE_SIZE];
 
         {
             let mut manager = self.manager.lock().unwrap();

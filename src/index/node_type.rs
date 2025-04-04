@@ -2,7 +2,7 @@ use std::cmp::{Eq, Ord, Ordering, PartialOrd};
 
 use super::errors::Error;
 
-#[derive(Clone, Eq, PartialEq, Debug)]
+#[derive(Clone, Copy, Eq, PartialEq, Debug)]
 pub struct PageId(pub u64);
 
 #[derive(Clone, Eq, PartialEq, PartialOrd, Ord, Debug)]
@@ -16,6 +16,8 @@ pub struct RowID {
 }
 
 #[derive(Clone, Eq, PartialEq, Debug)]
+
+// Next pointer is currently 8 bytes when it really should be 8
 pub struct NextPointer(pub Option<[u8; 8]>);
 
 impl Ord for RowID {
@@ -85,16 +87,13 @@ pub enum NodeType {
     Unexpected,
 }
 
-
-pub fn update_next_pointer(node: & mut NodeType, next_page_pointer: [u8; 8]) -> Result<(), Error> {
+pub fn update_next_pointer(node: &mut NodeType, next_page_pointer: [u8; 8]) -> Result<(), Error> {
     match node {
         NodeType::Leaf(_, next_pointer) => {
             *next_pointer = NextPointer(Some(next_page_pointer));
             Ok(())
         }
-        _ => {
-            Err(Error::UnexpectedError)
-        }
+        _ => Err(Error::UnexpectedError),
     }
 }
 

@@ -1,7 +1,7 @@
 use crate::index::{
     errors::Error,
     node::Node,
-    node_type::{self, Key, NodeType, PageId},
+    node_type::{Key, NodeType, PageId},
 };
 
 use super::{
@@ -12,7 +12,7 @@ use super::{
         NEXT_LEAF_POINTER_SIZE, NODE_TYPE_OFFSET, PARENT_POINTER_OFFSET, PARENT_POINTER_SIZE,
         PTR_SIZE, VALUE_SIZE,
     },
-    page::{page_constants::PAGE_SIZE, Page, SlottedPage},
+    page::page_constants::PAGE_SIZE,
 };
 
 /// Value is a wrapper for a value in the page.
@@ -105,7 +105,7 @@ impl BTreePage {
 
     // gets the next leaf pointer for leaf nodes
 
-    pub fn get_next_leaf_pointer(&self, is_leaf: bool) -> &[u8] {
+    pub fn get_next_leaf_pointer(&self) -> &[u8] {
         let next =
             &self.data[NEXT_LEAF_POINTER_OFFSET..NEXT_LEAF_POINTER_OFFSET + NEXT_LEAF_POINTER_SIZE];
         next
@@ -165,13 +165,13 @@ impl TryFrom<&Node> for BTreePage {
                     }
                 }
             }
-            NodeType::Leaf(kv_pairs, NextPointer) => {
+            NodeType::Leaf(kv_pairs, next_pointer) => {
                 // num of pairs
                 data[LEAF_NODE_NUM_PAIRS_OFFSET
                     ..LEAF_NODE_NUM_PAIRS_OFFSET + LEAF_NODE_NUM_PAIRS_SIZE]
                     .clone_from_slice(&kv_pairs.len().to_be_bytes());
 
-                match NextPointer.0 {
+                match next_pointer.0 {
                     Some(next_pointer) => {
                         data[NEXT_LEAF_POINTER_OFFSET
                             ..NEXT_LEAF_POINTER_OFFSET + NEXT_LEAF_POINTER_SIZE]

@@ -1,13 +1,13 @@
 use crate::storage::page::b_plus_tree_page::BTreePage;
 use crate::storage::page::btree_page_layout::{
     FromByte, INTERNAL_NODE_HEADER_SIZE, INTERNAL_NODE_NUM_CHILDREN_OFFSET, IS_ROOT_OFFSET,
-    KEY_SIZE, LEAF_NODE_HEADER_SIZE, LEAF_NODE_NUM_PAIRS_OFFSET, LEAF_NODE_NUM_PAIRS_SIZE,
-    NODE_TYPE_OFFSET, PARENT_POINTER_OFFSET, PTR_SIZE, ROW_ID_SEGMENT_SIZE, VALUE_SIZE,
+    KEY_SIZE, LEAF_NODE_HEADER_SIZE, LEAF_NODE_NUM_PAIRS_OFFSET, NODE_TYPE_OFFSET,
+    PARENT_POINTER_OFFSET, PTR_SIZE, ROW_ID_SEGMENT_SIZE, VALUE_SIZE,
 };
 
 use super::errors::Error;
 use super::node_type::{
-    self, update_next_pointer, Key, KeyValuePair, NextPointer, NodeType, PageId, RowID,
+    update_next_pointer, Key, KeyValuePair, NextPointer, NodeType, PageId, RowID,
 };
 
 /// Node represents a node in the BTree occupied by a single page in memory.
@@ -15,12 +15,16 @@ use super::node_type::{
 pub struct Node {
     pub node_type: NodeType,
     pub is_root: bool,
-    pub parent_id: Option<PageId>
+    pub parent_id: Option<PageId>,
 }
 
 impl Node {
     pub fn new(node_type: NodeType, is_root: bool) -> Node {
-        Node { node_type, is_root, parent_id: None}
+        Node {
+            node_type,
+            is_root,
+            parent_id: None,
+        }
     }
 
     /// returns the pointer to the sibling node
@@ -65,8 +69,6 @@ impl Node {
                 // Populate siblings keys.
                 let mut sibling_keys = keys.split_off(b - 1);
 
-        
-
                 // Pop median key - to be added to the parent..
                 let median_key = sibling_keys.remove(0);
 
@@ -108,7 +110,7 @@ impl TryFrom<BTreePage> for Node {
         if is_root {
             _parent_offset = None
         } else {
-            _parent_offset = Some(PageId((page.get_value_from_offset(PARENT_POINTER_OFFSET)?)));
+            _parent_offset = Some(PageId(page.get_value_from_offset(PARENT_POINTER_OFFSET)?));
         }
 
         match node_type {
@@ -116,15 +118,15 @@ impl TryFrom<BTreePage> for Node {
                 let num_children = page.get_value_from_offset(INTERNAL_NODE_NUM_CHILDREN_OFFSET)?;
                 let mut offset = INTERNAL_NODE_HEADER_SIZE;
 
-                for i in 1..=num_children {
+                for _ in 1..=num_children {
                     let child_offset = page.get_value_from_offset(offset)?;
-                    children.push(PageId((child_offset)));
+                    children.push(PageId(child_offset));
 
                     offset += PTR_SIZE;
                 }
 
                 // Number of keys is always one less than the number of children (i.e. branching factor)
-                for i in 1..num_children {
+                for _ in 1..num_children {
                     let key_raw = page.get_ptr_from_offset(offset, KEY_SIZE);
                     offset += KEY_SIZE;
 
@@ -138,7 +140,7 @@ impl TryFrom<BTreePage> for Node {
                 let mut offset = LEAF_NODE_NUM_PAIRS_OFFSET;
                 let num_keys_val_pairs = page.get_value_from_offset(offset)?;
                 offset = LEAF_NODE_HEADER_SIZE;
-                let next_pointer: [u8; 8] = page.get_next_leaf_pointer(true).try_into().unwrap();
+                let next_pointer: [u8; 8] = page.get_next_leaf_pointer().try_into().unwrap();
 
                 for _i in 0..num_keys_val_pairs {
                     let key_raw = page.get_ptr_from_offset(offset, KEY_SIZE);
