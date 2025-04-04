@@ -521,16 +521,6 @@ mod tests {
 
     #[test]
     fn search_works() -> Result<(), Error> {
-        fn serialize_int_to_10_bytes(n: u64) -> [u8; 10] {
-            let mut bytes = [0u8; 10]; // Create a 10-byte array initialized with zeros.
-            let n_bytes = n.to_le_bytes(); // Convert the integer to bytes (little-endian).
-
-            // Copy the integer bytes into the fixed-size array (first 8 bytes for u64).
-            bytes[..n_bytes.len()].copy_from_slice(&n_bytes);
-
-            bytes
-        }
-
         let (log_io, log_file_path) = Manager::open_log();
         let manager = Manager::new(log_io, log_file_path);
         let bpm = BufferPoolManager::new(4, manager, 2);
@@ -539,35 +529,30 @@ mod tests {
             .b_parameter(2)
             .build(String::from("index"), bpm)?;
 
-        let kv_pair_one = KeyValuePair::new(
-            serialize_int_to_10_bytes(42),
-            RowID::new([0u8; 4], [0u8; 4]),
-        );
-        let kv_pair_two =
-            KeyValuePair::new(serialize_int_to_10_bytes(3), RowID::new([1u8; 4], [1u8; 4]));
-        let kv_pair_three =
-            KeyValuePair::new(serialize_int_to_10_bytes(8), RowID::new([0u8; 4], [2u8; 4]));
+        let kv_pair_one = KeyValuePair::new(42, RowID::new(0, 0));
+        let kv_pair_two = KeyValuePair::new(3, RowID::new(0, 1));
+        let kv_pair_three = KeyValuePair::new(8, RowID::new(0, 2));
 
         btree.insert(kv_pair_one)?;
 
-        let value = btree.get(Key(serialize_int_to_10_bytes(42)))?;
+        let value = btree.get(Key::new(42))?;
 
-        assert_eq!(value.page_id, [0, 0, 0, 0]);
-        assert_eq!(value.slot_index, [0, 0, 0, 0]);
+        assert_eq!(value.page_id, 0_u32.to_le_bytes());
+        assert_eq!(value.slot_index, 0_u32.to_le_bytes());
 
         btree.insert(kv_pair_two)?;
 
-        let value = btree.get(Key(serialize_int_to_10_bytes(3)))?;
+        let value = btree.get(Key::new(3))?;
 
-        assert_eq!(value.page_id, [1, 1, 1, 1]);
-        assert_eq!(value.slot_index, [1, 1, 1, 1]);
+        assert_eq!(value.page_id, 0_u32.to_le_bytes());
+        assert_eq!(value.slot_index, 1_u32.to_le_bytes());
 
         btree.insert(kv_pair_three)?;
 
-        let value = btree.get(Key(serialize_int_to_10_bytes(8)))?;
+        let value = btree.get(Key::new(8))?;
 
-        assert_eq!(value.page_id, [0, 0, 0, 0]);
-        assert_eq!(value.slot_index, [2, 2, 2, 2]);
+        assert_eq!(value.page_id, 0_u32.to_le_bytes());
+        assert_eq!(value.slot_index, 2_u32.to_le_bytes());
 
         Ok(())
     }

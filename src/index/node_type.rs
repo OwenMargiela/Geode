@@ -8,6 +8,22 @@ pub struct PageId(pub u64);
 #[derive(Clone, Eq, PartialEq, PartialOrd, Ord, Debug)]
 pub struct Key(pub [u8; 10]);
 
+impl Key {
+    pub fn new(key: u64) -> Self {
+        fn serialize_int_to_10_bytes(n: u64) -> [u8; 10] {
+            let mut bytes = [0u8; 10]; // Create a 10-byte array initialized with zeros.
+            let n_bytes = n.to_le_bytes(); // Convert the integer to bytes (little-endian).
+
+            // Copy the integer bytes into the fixed-size array (first 8 bytes for u64).
+            bytes[..n_bytes.len()].copy_from_slice(&n_bytes);
+
+            bytes
+        }
+
+        Key(serialize_int_to_10_bytes(key))
+    }
+}
+
 #[derive(Clone, Eq, PartialEq, Debug)]
 // Page Number and Slot Index
 pub struct RowID {
@@ -36,10 +52,20 @@ impl PartialOrd for RowID {
 }
 
 impl RowID {
-    pub fn new(page_id: [u8; 4], slot_index: [u8; 4]) -> Self {
+    pub fn new(page_id: u32, slot_index: u32) -> Self {
+        fn serialize_int_to_4_bytes(n: u32) -> [u8; 4] {
+            let mut bytes = [0u8; 4]; // Create a 10-byte array initialized with zeros.
+            let n_bytes = n.to_le_bytes(); // Convert the integer to bytes (little-endian).
+
+            // Copy the integer bytes into the fixed-size array (first 8 bytes for u64).
+            bytes[..n_bytes.len()].copy_from_slice(&n_bytes);
+
+            bytes
+        }
+
         RowID {
-            page_id,
-            slot_index,
+            page_id: serialize_int_to_4_bytes(page_id),
+            slot_index: serialize_int_to_4_bytes(slot_index),
         }
     }
 }
@@ -70,8 +96,21 @@ impl PartialEq for KeyValuePair {
 }
 impl KeyValuePair {
     // New constructor that accepts a Vec<u8> for the key and RowID for the value
-    pub fn new(key: [u8; 10], value: RowID) -> KeyValuePair {
-        KeyValuePair { key, value }
+    pub fn new(key: u64, value: RowID) -> KeyValuePair {
+        fn serialize_int_to_10_bytes(n: u64) -> [u8; 10] {
+            let mut bytes = [0u8; 10]; // Create a 10-byte array initialized with zeros.
+            let n_bytes = n.to_le_bytes(); // Convert the integer to bytes (little-endian).
+
+            // Copy the integer bytes into the fixed-size array (first 8 bytes for u64).
+            bytes[..n_bytes.len()].copy_from_slice(&n_bytes);
+
+            bytes
+        }
+
+        KeyValuePair {
+            key: serialize_int_to_10_bytes(key),
+            value,
+        }
     }
 }
 

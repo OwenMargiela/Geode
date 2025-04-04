@@ -150,6 +150,9 @@ impl TryFrom<BTreePage> for Node {
                     let value_raw = page.get_ptr_from_offset(offset, VALUE_SIZE);
 
                     let value: [u8; 10] = value_raw.try_into().unwrap();
+
+                    // default values
+                    // modify page layout scheme
                     let mut page_id: [u8; 4] = [0u8; 4];
                     let mut slot_index: [u8; 4] = [0u8; 4];
 
@@ -158,11 +161,13 @@ impl TryFrom<BTreePage> for Node {
                     slot_index
                         .copy_from_slice(&value[ROW_ID_SEGMENT_SIZE..ROW_ID_SEGMENT_SIZE + 4]);
 
-                    let row_id = RowID::new(page_id, slot_index);
+                    let row_id =
+                        RowID::new(u32::from_le_bytes(page_id), u32::from_le_bytes(slot_index));
                     offset += VALUE_SIZE;
 
                     // Trim leading or trailing zeros.
-                    pairs.push(KeyValuePair::new(key_raw.try_into().unwrap(), row_id))
+                    let key = u64::from_le_bytes(key_raw[0..PTR_SIZE].try_into().unwrap());
+                    pairs.push(KeyValuePair::new(key, row_id))
                 }
 
                 Ok(Node::new(
@@ -280,23 +285,9 @@ mod tests {
 
     #[test]
     fn split_leaf_works() -> Result<(), Error> {
-        fn serialize_int_to_10_bytes(n: u64) -> [u8; 10] {
-            let mut bytes = [0u8; 10]; // Create a 10-byte array initialized with zeros.
-            let n_bytes = n.to_le_bytes(); // Convert the integer to bytes (little-endian).
-
-            // Copy the integer bytes into the fixed-size array (first 8 bytes for u64).
-            bytes[..n_bytes.len()].copy_from_slice(&n_bytes);
-
-            bytes
-        }
-
-        let key = serialize_int_to_10_bytes(42);
-        let key_two = serialize_int_to_10_bytes(3);
-        let key_three = serialize_int_to_10_bytes(8);
-
-        let kv_pair_one = KeyValuePair::new(key, RowID::new([0u8; 4], [0u8; 4]));
-        let kv_pair_two = KeyValuePair::new(key_two, RowID::new([0u8; 4], [1u8; 4]));
-        let kv_pair_three = KeyValuePair::new(key_three, RowID::new([0u8; 4], [2u8; 4]));
+        let kv_pair_one = KeyValuePair::new(42, RowID::new(0, 0));
+        let kv_pair_two = KeyValuePair::new(3, RowID::new(0, 1));
+        let kv_pair_three = KeyValuePair::new(8, RowID::new(0, 2));
 
         let mut node = Node::new(
             NodeType::Leaf(
@@ -314,8 +305,8 @@ mod tests {
             node.node_type,
             NodeType::Leaf(
                 vec![
-                    KeyValuePair::new(key, RowID::new([0u8; 4], [0u8; 4])),
-                    KeyValuePair::new(key_two, RowID::new([0u8; 4], [1u8; 4]))
+                    KeyValuePair::new(42, RowID::new(0, 0)),
+                    KeyValuePair::new(3, RowID::new(0, 1))
                 ],
                 NextPointer(Some([0, 0, 0, 0, 0, 0, 0, 1])),
             )
@@ -324,7 +315,7 @@ mod tests {
         assert_eq!(
             sibling.node_type,
             NodeType::Leaf(
-                vec![KeyValuePair::new(key_three, RowID::new([0u8; 4], [2u8; 4]))],
+                vec![KeyValuePair::new(8, RowID::new(0, 2))],
                 NextPointer(None)
             )
         );
