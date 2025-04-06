@@ -28,6 +28,8 @@ impl<'a> PageGuard<'a> {
             None
         }
     }
+
+    
 }
 
 pub struct FrameGuard<'a> {
@@ -52,7 +54,7 @@ impl<'a> FrameGuard<'a> {
 
         let on_drop = Box::new(move |frame_id: u32, evictabilility: bool| {
             let mut replacer_guard = replacer.lock().unwrap();
-            dbg!("Aqquired replacer guard");
+
 
             replacer_guard.record_access(frame_id);
             replacer_guard.set_evictable(frame_id, evictabilility);
@@ -78,7 +80,7 @@ impl<'a> FrameGuard<'a> {
 
 impl<'a> Drop for FrameGuard<'a> {
     fn drop(&mut self) {
-        dbg!("Dropping write guard");
+
 
         let frame_guard = self
             .guard

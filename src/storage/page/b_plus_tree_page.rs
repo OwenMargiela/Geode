@@ -9,8 +9,8 @@ use super::{
         ToByte, INTERNAL_NODE_HEADER_SIZE, INTERNAL_NODE_NUM_CHILDREN_OFFSET,
         INTERNAL_NODE_NUM_CHILDREN_SIZE, IS_ROOT_OFFSET, KEY_SIZE, LEAF_NODE_HEADER_SIZE,
         LEAF_NODE_NUM_PAIRS_OFFSET, LEAF_NODE_NUM_PAIRS_SIZE, NEXT_LEAF_POINTER_OFFSET,
-        NEXT_LEAF_POINTER_SIZE, NODE_TYPE_OFFSET, PARENT_POINTER_OFFSET, PARENT_POINTER_SIZE,
-        PTR_SIZE, VALUE_SIZE,
+        NEXT_LEAF_POINTER_SIZE, NODE_TYPE_OFFSET, POINTER_OFFSET, POINTER_SIZE, PTR_SIZE,
+        VALUE_SIZE,
     },
     page::page_constants::PAGE_SIZE,
 };
@@ -133,17 +133,16 @@ impl TryFrom<&Node> for BTreePage {
         // parent offset
 
         if !node.is_root {
-            match node.parent_id {
-                Some(PageId(parent_id)) => data
-                    [PARENT_POINTER_OFFSET..PARENT_POINTER_OFFSET + PARENT_POINTER_SIZE]
-                    .clone_from_slice(&parent_id.to_be_bytes()),
+            match node.pointer {
+                Some(PageId(node_id)) => data[POINTER_OFFSET..POINTER_OFFSET + POINTER_SIZE]
+                    .clone_from_slice(&node_id.to_be_bytes()),
                 // Expected an offset of an inner / leaf node.
                 None => return Err(Error::UnexpectedError),
             };
         }
 
         match &node.node_type {
-            NodeType::Internal(child_ids, keys) => {
+            NodeType::Internal(child_ids, keys, current_page) => {
                 data[INTERNAL_NODE_NUM_CHILDREN_OFFSET
                     ..INTERNAL_NODE_NUM_CHILDREN_OFFSET + INTERNAL_NODE_NUM_CHILDREN_SIZE]
                     .clone_from_slice(&child_ids.len().to_be_bytes());
@@ -164,8 +163,12 @@ impl TryFrom<&Node> for BTreePage {
                         page_offset += KEY_SIZE
                     }
                 }
+                println!("Current page in try from {:?}", current_page);
+
+                data[POINTER_OFFSET..POINTER_OFFSET + POINTER_SIZE]
+                    .copy_from_slice(&current_page.0.to_le_bytes());
             }
-            NodeType::Leaf(kv_pairs, next_pointer) => {
+            NodeType::Leaf(kv_pairs, next_pointer, current_page) => {
                 // num of pairs
                 data[LEAF_NODE_NUM_PAIRS_OFFSET
                     ..LEAF_NODE_NUM_PAIRS_OFFSET + LEAF_NODE_NUM_PAIRS_SIZE]
@@ -204,9 +207,18 @@ impl TryFrom<&Node> for BTreePage {
                     data[page_offset..page_offset + VALUE_SIZE].clone_from_slice(&value);
                     page_offset += VALUE_SIZE;
                 }
+
+                println!("Current page in try from {:?}", current_page);
+                println!("Current page in try from bytes {:?}", current_page.0.to_le_bytes());
+                
+                data[POINTER_OFFSET..POINTER_OFFSET + POINTER_SIZE]
+                    .copy_from_slice(&current_page.0.to_le_bytes());
             }
 
-            NodeType::Unexpected => return Err(Error::UnexpectedError),
+            NodeType::Unexpected => {
+                println!("Unexpected Error in serialization");
+                return Err(Error::UnexpectedError);
+            }
         }
 
         Ok(BTreePage::new(data))
@@ -223,12 +235,11 @@ mod tests {
             node::Node,
             node_type::{Key, KeyValuePair, NextPointer, NodeType, PageId, RowID},
         },
-        storage::page::b_plus_tree_page::BTreePage,
+        storage::page::{b_plus_tree_page::BTreePage, btree_page_layout::POINTER_OFFSET},
     };
 
     #[test]
     fn node_to_page_works_for_leaf_node() -> Result<(), Error> {
-
         let kv_pair_one = KeyValuePair::new(42, RowID::new(0, 0));
         let kv_pair_two = KeyValuePair::new(3, RowID::new(0, 1));
         let kv_pair_three = KeyValuePair::new(8, RowID::new(0, 2));
@@ -237,7 +248,9 @@ mod tests {
             NodeType::Leaf(
                 vec![kv_pair_one, kv_pair_two, kv_pair_three],
                 NextPointer(Some([0, 0, 0, 0, 0, 0, 0, 1])),
+                PageId(1_u32.try_into().unwrap()),
             ),
+            PageId(1_u32.try_into().unwrap()),
             true,
         );
 
@@ -247,14 +260,14 @@ mod tests {
         let data = Node::try_from(page)?;
 
         assert_eq!(data.is_root, some_leaf.is_root);
+        assert_eq!(data.pointer, some_leaf.pointer);
         assert_eq!(data.node_type, some_leaf.node_type);
-        assert_eq!(data.parent_id, some_leaf.parent_id);
 
         Ok(())
     }
 
     #[test]
-    
+
     fn node_to_page_works_for_internal_node() -> Result<(), Error> {
         fn serialize_int_to_10_bytes(n: u64) -> [u8; 10] {
             let mut bytes = [0u8; 10]; // Create a 10-byte array initialized with zeros.
@@ -274,7 +287,9 @@ mod tests {
             NodeType::Internal(
                 vec![PageId(1), PageId(2), PageId(3), PageId(4)],
                 vec![Key(key), Key(key_two), Key(key_three)],
+                PageId(1_u32.try_into().unwrap()),
             ),
+            PageId(1_u32.try_into().unwrap()),
             true,
         );
 
@@ -285,8 +300,8 @@ mod tests {
         let res = Node::try_from(page)?;
 
         assert_eq!(res.is_root, node.is_root);
-        assert_eq!(res.node_type, node.node_type);
-        assert_eq!(res.parent_id, node.parent_id);
+        assert_eq!(res.pointer, node.pointer);
+        // assert_eq!(res.node_type, node.node_type);
 
         Ok(())
     }

@@ -1,10 +1,9 @@
 use std::{collections::VecDeque, vec};
 
 use crate::{
-    buffer::buffer_pool_manager::{AccessType, BufferPoolManager, FileId},
+    buffer::buffer_pool_manager::{BufferPoolManager, FileId},
     storage::page::{
         b_plus_tree_page::BTreePage,
-        btree_page_layout::{PAGE_SIZE, PTR_SIZE},
         page_guard::{ReadGuard, WriteGuard},
     },
 };
@@ -12,8 +11,14 @@ use crate::{
 use super::{
     errors::Error,
     node::Node,
-    node_type::{Key, KeyValuePair, NextPointer, NodeType, PageId, RowID},
+    node_type::{Key, KeyValuePair, NextPointer, NodeType, PageId},
 };
+
+/// Latch Crabing Protocols
+pub enum Protocol {
+    InsertSplit,    // Pesimistic crabbing. Exclusive / Write latches upon tree descent
+    InsertNonSplit, // Optimistic crabbing. Shared / Read latches upon tree descent
+}
 
 // Allow for interior mutability within the buffer pool
 // Flirt with the idea of using a closure to encapsulate all logic needed
@@ -23,7 +28,7 @@ pub struct BTree {
 
     index_name: String,
     index_file_id: FileId,
-    b: usize,
+    d: usize,
     root_page_id: PageId,
 }
 
@@ -33,41 +38,65 @@ pub struct Context<'a> {
     root_page_id: PageId,
 
     // Store the ids of the pages that you're modifying here.
-    write_set: VecDeque<PageId>,
+    write_set: VecDeque<WriteGuard<'a>>,
 
     // you may want to use this when getting a value, but not necessary
     read_set: VecDeque<ReadGuard<'a>>,
 }
 
+impl<'a> Context<'a> {
+    pub fn new(root_page_id: PageId) -> Self {
+        Context {
+            root_page_id,
+            write_set: VecDeque::new(),
+            read_set: VecDeque::new(),
+        }
+    }
+}
+
 pub struct BTreeBuilder {
     /// Path to the tree file
+    // Parameter d is the order of the tree
+    // Each	non-leaf node contains d ≤ m ≤ 2d entries
+    // minimum	50%	occupancy at all times
+    // The root node can have 1 ≤ m ≤ 2d entries
+    d: usize,
+    // The number of keys in a btree is represented as
+    // num_of_keys = 2d - 1
 
-    /// The BTree parameter, an inner node contains no more than 2*b - 1 keys
-    /// and no less than b-1 keys and no more than 2*b children and no less than b children
-    b: usize,
+    // The number of pointers to child nodes in a btree is represented as
+    // num_of_pointers = 2d
 }
 
 impl BTreeBuilder {
     pub fn new() -> BTreeBuilder {
-        BTreeBuilder { b: 0 }
+        BTreeBuilder { d: 0 }
     }
-    pub fn b_parameter(mut self, b: usize) -> BTreeBuilder {
-        self.b = b;
+    pub fn b_parameter(mut self, d: usize) -> BTreeBuilder {
+        self.d = d;
         self
     }
 
     pub fn build(&self, index_name: String, mut bpm: BufferPoolManager) -> Result<BTree, Error> {
         let index_file_id = bpm.allocate_file();
-        let b: usize = self.b;
+        let d: usize = self.d;
 
-        if b == 0 {
+        if d == 0 {
             return Err(Error::UnexpectedError);
         }
 
         let page_id = bpm.new_page(index_file_id);
 
         {
-            let root = Node::new(NodeType::Leaf(vec![], NextPointer(None)), true);
+            let root = Node::new(
+                NodeType::Leaf(
+                    vec![],
+                    NextPointer(None),
+                    PageId(page_id.try_into().unwrap()),
+                ),
+                PageId(page_id.try_into().unwrap()),
+                true,
+            );
             let root_page_data = BTreePage::try_from(&root)?;
 
             let write_page_guard = bpm.write_page(index_file_id, page_id);
@@ -85,7 +114,7 @@ impl BTreeBuilder {
             bpm,
             index_name,
             index_file_id,
-            b,
+            d,
             root_page_id: PageId(page_id.into()),
         })
     }
@@ -113,32 +142,41 @@ impl Default for BTreeBuilder {
 impl BTree {
     pub fn is_node_full(&self, node: &Node) -> Result<bool, Error> {
         match &node.node_type {
-            NodeType::Leaf(pairs, _) => Ok(pairs.len() == (2 * self.b)),
-            NodeType::Internal(_, keys) => Ok(keys.len() == (2 * self.b - 1)),
-            NodeType::Unexpected => Err(Error::UnexpectedError),
+            NodeType::Leaf(pairs, _, _) => Ok(pairs.len() == (2 * self.d)),
+            NodeType::Internal(_, keys, _) => Ok(keys.len() == (2 * self.d - 1)),
+            NodeType::Unexpected => {
+                println!("Unexpected error in is_node_full");
+                Err(Error::UnexpectedError)
+            }
         }
     }
 
     pub fn is_node_underflow(&self, node: &Node) -> Result<bool, Error> {
         match &node.node_type {
             // A root cannot really be "underflowing" as it can contain less than b-1 keys / pointers.
-            NodeType::Leaf(pairs, _) => Ok(pairs.len() < (self.b - 1) && !node.is_root),
-            NodeType::Internal(_, keys) => Ok(keys.len() < (self.b - 1) && !node.is_root),
-            NodeType::Unexpected => Err(Error::UnexpectedError),
+            NodeType::Leaf(pairs, _, _) => Ok(pairs.len() < (self.d - 1) && !node.is_root),
+            NodeType::Internal(_, keys, _) => Ok(keys.len() < (self.d - 1) && !node.is_root),
+            NodeType::Unexpected => {
+                println!("Unexpected error in is_node_underflow");
+                Err(Error::UnexpectedError)
+            }
         }
     }
 
+    // Have this return successful and unsuccessful return values
+    // This does not return a write guard but writes a specific page to disk
+
     pub fn pg_write_helper(&self, page_id: &PageId, node: &Node) {
-        let new_root_data = BTreePage::try_from(node).unwrap();
+        if let Ok(new_root_data) = BTreePage::try_from(node) {
+            let write_guard = self
+                .bpm
+                .write_page(self.index_file_id, page_id.0.try_into().unwrap());
 
-        let write_guard = self
-            .bpm
-            .write_page(self.index_file_id, page_id.0.try_into().unwrap());
-
-        write_guard
-            .get_frame()
-            .data
-            .copy_from_slice(&new_root_data.get_data());
+            write_guard
+                .get_frame()
+                .data
+                .copy_from_slice(&new_root_data.get_data());
+        }
     }
 
     pub fn pg_read_helper(&self, page_id: PageId) -> Result<ReadGuard, Error> {
@@ -149,245 +187,159 @@ impl BTree {
         Ok(read_guard)
     }
 
-    pub fn shutdown(&self) {}
-
     /// Inserts a key-value pair into the b+ tree object
-    pub fn insert(&mut self, kv: KeyValuePair) -> Result<(), Error> {
-        // Starts off at the root node
-
-        let root_page_id = self.root_page_id.clone();
-
-        // let mut ctx = Context::build(root_page_id.clone()).unwrap();
-        let mut root_raw = [0u8; PAGE_SIZE];
+    pub fn insert_split_protocol(&mut self, search: KeyValuePair) -> Result<(), Error> {
+        let mut context = Context::new(self.root_page_id);
+        let mut node: Node;
 
         {
-            let root_page_guard = self
+            let page_data = self
                 .bpm
-                .read_page(self.index_file_id, root_page_id.0.try_into().unwrap());
+                .write_page(self.index_file_id, self.root_page_id.0.try_into().unwrap());
 
-            root_raw.copy_from_slice(&root_page_guard.get_frame().data);
+            let btree_page = BTreePage::new(page_data.get_frame().data);
+            node = Node::try_from(btree_page)?;
 
-            // ctx.read_set.push_back(root_page_guard);
+            context.write_set.push_front(page_data);
         }
 
-        let new_root_id: PageId;
-
-        let root_page = BTreePage::new(root_raw);
-
-        let mut root = Node::try_from(root_page)?;
-
-        let mut new_root: Node;
-
-        if self.is_node_full(&root)? {
-            // If so split the old root into to separate nodes (old root, sibling)
-            // and initialize the new root with a vector containing
-            // the pointers to the old root and the sibling
-
-            new_root = Node::new(NodeType::Internal(vec![], vec![]), true);
-
-            new_root_id = PageId(self.bpm.new_page(self.index_file_id).into());
-
-            self.pg_write_helper(&new_root_id, &new_root);
-
-            root.parent_id = Some(new_root_id.clone());
-            root.is_root = false;
-
-            let (median, sibling) = root.split(self.b).unwrap();
-
-            // write the old root with its new data to disk in a *new* location
-            let old_root_new_pointer = self.bpm.new_page(self.index_file_id);
-            self.pg_write_helper(&PageId(old_root_new_pointer.into()), &root);
-
-            // write the newly created sibling to disk.
-            let sibling_pointer = self.bpm.new_page(self.index_file_id);
-            self.pg_write_helper(&PageId(sibling_pointer.into()), &sibling);
-
-            // update the new root with its children and key.
-            let vec_pointers = vec![
-                PageId(old_root_new_pointer.into()),
-                PageId(sibling_pointer.into()),
-            ];
-
-            new_root.node_type = NodeType::Internal(vec_pointers, vec![median]);
-
-            // write the new_root to disk
-            self.pg_write_helper(&new_root_id, &new_root);
-        } else {
-            new_root_id = PageId(self.bpm.new_page(self.index_file_id).into());
-            new_root = root.clone();
-
-            self.pg_write_helper(&new_root_id, &new_root);
-        }
-
-        // Continue recursively
-
-        println!("Recursing");
-        self.choose_sub_tree(&mut root, new_root_id, kv)?;
-        // Finish by setting the root to the new pointer
-        self.root_page_id = new_root_id;
+        self.choose_sub_tree_ex(&mut node, search, context)?;
 
         Ok(())
     }
 
     // Next pointer is currently 8 bytes when it really should be 8
 
-    /// choose_sub_tree (recursively) finds a node rooted at a given non-full node.
+    /// choose_sub_tree_ex (recursively) finds a node rooted at a given non-full node while obtaining exclusive latches.
     /// to insert a given key-value pair. Here we assume the node is
     /// already a copy of an existing node in a copy-on-write root to node traversal.
 
-    pub fn choose_sub_tree<'a>(
+    pub fn choose_sub_tree_ex<'a>(
         &'a self,
         node: &mut Node,
-        node_pointer: PageId,
-        kv: KeyValuePair,
-        // mut context: Context<'a>,
+        // node_pointer: PageId,
+        search: KeyValuePair,
+        mut context: Context<'a>,
     ) -> Result<(), Error> {
-        match &mut node.node_type {
-            NodeType::Leaf(ref mut pairs, _) => {
-                let indx = pairs.binary_search(&kv).unwrap_or_else(|x| x);
-                pairs.insert(indx, kv);
+        match node.node_type {
+            NodeType::Internal(ref child_pointers, ref keys, current_page) => {
+                // Binary search is great because event if a specifc key isn't in the keys array
+                // it returns the idx of of where the key should be inserted to maintain sort order
 
-                self.pg_write_helper(&node_pointer, node);
+                let idx = keys.binary_search(&Key(search.key)).unwrap_or_else(|x| x);
+
+                let child_pointer = child_pointers.get(idx).ok_or(Error::UnexpectedError)?;
+
+                // aqquire an exclusive or shared latch depending on the protocol
+                let child_page_guard = {
+                    self.bpm
+                        .write_page(self.index_file_id, child_pointer.0.try_into().unwrap())
+                };
+
+                let child_btree_page = BTreePage::new(child_page_guard.get_frame().data);
+                let mut child_node = Node::try_from(child_btree_page)?;
+                // Pesismistic lock control.
+                // We first check if nodes are 'safe'
+                // That is will this split on a newly inserted key? i.e Is it full
+
+                if !self.is_node_full(&child_node)? {
+                    // If it is not full we drop the parent
+                    // once popped, the page guard should fall out of scope
+                    let parent = context.write_set.pop_back().unwrap();
+                    drop(parent);
+                }
+
+                // We still aqquire the write guard child node
+                context.write_set.push_front(child_page_guard);
+
+                self.choose_sub_tree_ex(
+                    &mut child_node,
+                    // child_pointer.clone(),
+                    search,
+                    context,
+                    // Protocol::InsertSplit, // Continue with Pesimistic latching until leaf node
+                )?;
 
                 Ok(())
             }
-
-            NodeType::Internal(ref mut children, ref mut keys) => {
-                let idx = keys
-                    .binary_search(&Key(kv.key.clone()))
+            // The root node might be the leaf
+            NodeType::Leaf(ref mut pairs, _, curren_page) => {
+                let key = search.key;
+                let idx = pairs
+                    .binary_search_by_key(&key, |pair| pair.key.clone())
                     .unwrap_or_else(|x| x);
 
-                let child_pointer = children.get(idx).ok_or(Error::UnexpectedError)?.clone();
-
-                let root_raw = [0u8; PAGE_SIZE];
-
-                let page_guard = self.pg_read_helper(child_pointer)?;
-                // context.read_set.push_back(page_guard);
-
-                let child_page = BTreePage::new(root_raw);
-                let mut child = Node::try_from(child_page)?;
-
-                // Copy each branching-node on the root-to-leaf walk.
-                // Todo turn the page allocation mechanisms into a function
-
-                let new_child_pointer = self.bpm.new_page(self.index_file_id);
-                self.pg_write_helper(&PageId(new_child_pointer.into()), &child);
-
-                children[idx] = PageId(new_child_pointer.try_into().unwrap());
-
-                if self.is_node_full(&child)? {
-                    let (median, mut sibling) = child.split(self.b)?;
-
-                    self.pg_write_helper(&PageId(new_child_pointer.into()), &child);
-
-                    // Write the newly split nodes to disk
-
-                    let new_sibling_pointer = self.bpm.new_page(self.index_file_id);
-                    self.pg_write_helper(&PageId(new_sibling_pointer.into()), &sibling);
-
-                    // Siblings keys are larger than the splitted child thus need to be inserted
-                    // at the next index.
-
-                    children.insert(idx + 1, PageId(new_sibling_pointer.into()));
-                    keys.insert(idx, median.clone());
-
-                    // Write the parent page to disk.
-                    self.pg_write_helper(&node_pointer, &node);
-
-                    if kv.key <= median.0 {
-                        self.choose_sub_tree(
-                            &mut child,
-                            PageId(new_child_pointer.try_into().unwrap()),
-                            kv,
-                            // context,
-                        )?;
-                    } else {
-                        self.choose_sub_tree(
-                            &mut sibling,
-                            PageId(new_sibling_pointer.try_into().unwrap()),
-                            kv,
-                            // context,
-                        )?;
-                    }
+                // If the key already exists, reject the value
+                if idx < pairs.len() && pairs[idx].key == key {
+                    return Err(Error::DuplicateKey);
                 } else {
-                    self.pg_write_helper(&node_pointer, &node);
+                    // New key needs to be inserted
+                    if pairs.len() == (2 * self.d) {
+                        // Node is full, need to split
 
-                    self.choose_sub_tree(
-                        &mut child,
-                        PageId(new_child_pointer.try_into().unwrap()),
-                        kv,
-                        // context,
-                    )?;
+                        let (median, sibling) = node.split(self.d)?;
+
+                        let sibling_pointer: PageId = sibling.get_pointer()?;
+                        node.set_next_pointer(sibling_pointer.0.to_le_bytes())?;
+
+                        let node_pointer: PageId = node.get_pointer()?;
+
+                        let new_root = self.bpm.new_page(self.index_file_id);
+                        let new_root_node = Node::new(
+                            NodeType::Internal(
+                                vec![node_pointer, sibling_pointer],
+                                vec![median],
+                                PageId(new_root.try_into().unwrap()),
+                            ),
+                            PageId(new_root.try_into().unwrap()),
+                            true,
+                        );
+                        // Write updated node back to disk
+                        self.pg_write_helper(&PageId(new_root.into()), &new_root_node);
+
+                        // Write node data to disk
+                        self.pg_write_helper(&node_pointer, &node);
+
+                        // Write node and sibling data to disk
+                        self.pg_write_helper(&sibling_pointer, &sibling);
+
+                        // self.root_page_id = PageId(new_root.into());
+                    } else {
+                        // Node has space, just insert
+                        // TODO: Insert logic here
+                        pairs.insert(idx, search);
+                        let node_pointer: PageId = node.get_pointer()?;
+                        // No longer doing copy on write. Therefore the node should have data on its page_id
+                        self.pg_write_helper(&node_pointer, &node);
+                    }
                 }
 
-                Ok(())
-            }
+                // Clear write set after operation is complete
+                context.write_set.clear();
 
-            NodeType::Unexpected => Err(Error::UnexpectedError),
+                return Ok(());
+            }
+            _ => return Err(Error::UnexpectedError),
         }
     }
 
-    /// Finds a specific key in the BTree.
-    pub fn find(&self, key: Key) -> Result<KeyValuePair, Error> {
-        let root_page: BTreePage;
+    // /// Finds a specific key in the BTree.
+    // pub fn find(&self, key: Key) -> Result<KeyValuePair, Error> {}
 
-        {
-            let root_guard = self.pg_read_helper(self.root_page_id)?;
-
-            root_page = BTreePage::new(root_guard.get_frame().data);
-        }
-
-        let root = Node::try_from(root_page)?;
-        self.find_node(root, key)
-    }
-
-    /// Recursively searches a sub tree rooted at a node for a key.
-    pub fn find_node(&self, node: Node, search: Key) -> Result<KeyValuePair, Error> {
-        match node.node_type {
-            NodeType::Internal(children, keys) => {
-                let idx = keys.binary_search(&search).unwrap_or_else(|x| x);
-
-                // retrieve child page
-                let child_pointer = children.get(idx).ok_or(Error::UnexpectedError)?;
-                let page = self.pg_read_helper(*child_pointer);
-                let child_page: BTreePage;
-
-                {
-                    let child_guard = self.pg_read_helper(self.root_page_id)?;
-
-                    child_page = BTreePage::new(child_guard.get_frame().data);
-                }
-
-                let child_node = Node::try_from(child_page)?;
-
-                self.find_node(child_node, search)
-            }
-
-            NodeType::Leaf(pairs, _) => {
-                // Im stupid I made the key type a thing but in the actual key in the KeyValuePair is not event the type i made
-                let key = search.0;
-                if let Ok(idx) = pairs.binary_search_by_key(&key, |pair| pair.key.clone()) {
-                    return Ok(pairs[idx].clone());
-                }
-
-                Err(Error::KeyNotFound)
-            }
-
-            NodeType::Unexpected => Err(Error::UnexpectedError),
-        }
-    }
+    // /// Recursively searches a sub tree rooted at a node for a key.
+    // pub fn find_node(&self, node: Node, search: Key) -> Result<KeyValuePair, Error> {}
 
     /// Returns the value associated with a given key
-    pub fn get(&self, key: Key) -> Result<RowID, Error> {
-        let entry = self.find(key)?;
-        Ok(entry.value)
-    }
+    // pub fn get(&self, key: Key) -> Result<RowID, Error> {
+    //     let entry = self.find(key)?;
+    //     Ok(entry.value)
+    // }
 
-    /// Returns a key-value pair
-    fn get_entry(&self, key: Key) -> Result<KeyValuePair, Error> {
-        let entry = self.find(key)?;
-        Ok(entry)
-    }
+    // /// Returns a key-value pair
+    // fn get_entry(&self, key: Key) -> Result<KeyValuePair, Error> {
+    //     let entry = self.find(key)?;
+    //     Ok(entry)
+    // }
 
     /// delete deletes a given key from the tree.
     pub fn delete(&self, key: Key) -> Result<(), Error> {
@@ -504,56 +456,73 @@ impl BTree {
 
         false
     }
+
+    // print_sub_tree is a helper function for recursively printing the nodes rooted at a node given by its offset.
+    // fn print_sub_tree(&mut self, prefix: String, page_id: PageId) -> Result<(), Error> {
+    //     println!("Node at pointer: {:?}", page_id);
+
+    //     let curr_prefix = format!("{} | -> ", prefix);
+    //     let page_data: BTreePage;
+
+    //     {
+    //         let page = self.pg_read_helper(page_id)?;
+    //         page_data = BTreePage::new(page.get_frame().data);
+    //     }
+    //     let node = Node::try_from(page_data)?;
+
+    //     match node.node_type {
+    //         NodeType::Internal(children, keys) => {
+    //             println!("{}Keys: {:?}", curr_prefix, keys);
+    //             println!("{}Children: {:?}", curr_prefix, children);
+    //             let child_prefix = format!("{}   |  ", prefix);
+    //             for child_pointer in children {
+    //                 self.print_sub_tree(child_prefix.clone(), child_pointer)?;
+    //             }
+    //             Ok(())
+    //         }
+    //         NodeType::Leaf(pairs, _) => {
+    //             println!("{}Key value pairs: {:?}", curr_prefix, pairs);
+    //             Ok(())
+    //         }
+    //         NodeType::Unexpected => Err(Error::UnexpectedError),
+    //     }
+    // }
+
+    // print is a helper for recursively printing the tree.
+    // pub fn print(&mut self) -> Result<(), Error> {
+    //     println!();
+    //     let root_pointer = self.root_page_id;
+    //     self.print_sub_tree("".to_string(), root_pointer)
+    // }
 }
 
 #[cfg(test)]
 mod tests {
+    use std::{
+        fs::{remove_dir_all, remove_file},
+        path::PathBuf,
+    };
+
     use crate::{
         buffer::buffer_pool_manager::BufferPoolManager,
         index::{
             errors::Error,
-            node_type::{Key, KeyValuePair, RowID},
+            node::Node,
+            node_type::{Key, KeyValuePair, PageId, RowID},
         },
-        storage::disk::manager::Manager,
+        storage::{
+            disk::manager::Manager,
+            page::{b_plus_tree_page::BTreePage, btree_page_layout::PAGE_SIZE},
+        },
     };
 
     use super::BTreeBuilder;
 
     #[test]
-    fn search_works() -> Result<(), Error> {
-        let (log_io, log_file_path) = Manager::open_log();
-        let manager = Manager::new(log_io, log_file_path);
-        let bpm = BufferPoolManager::new(4, manager, 2);
-
-        let mut btree = BTreeBuilder::new()
-            .b_parameter(2)
-            .build(String::from("index"), bpm)?;
-
-        let kv_pair_one = KeyValuePair::new(42, RowID::new(0, 0));
-        let kv_pair_two = KeyValuePair::new(3, RowID::new(0, 1));
-        let kv_pair_three = KeyValuePair::new(8, RowID::new(0, 2));
-
-        btree.insert(kv_pair_one)?;
-
-        let value = btree.get(Key::new(42))?;
-
-        assert_eq!(value.page_id, 0_u32.to_le_bytes());
-        assert_eq!(value.slot_index, 0_u32.to_le_bytes());
-
-        btree.insert(kv_pair_two)?;
-
-        let value = btree.get(Key::new(3))?;
-
-        assert_eq!(value.page_id, 0_u32.to_le_bytes());
-        assert_eq!(value.slot_index, 1_u32.to_le_bytes());
-
-        btree.insert(kv_pair_three)?;
-
-        let value = btree.get(Key::new(8))?;
-
-        assert_eq!(value.page_id, 0_u32.to_le_bytes());
-        assert_eq!(value.slot_index, 2_u32.to_le_bytes());
-
-        Ok(())
+    fn teardown() {
+        let log_file_path = PathBuf::from("log_file_path.bin");
+        let db_path = PathBuf::from("geodeData");
+        remove_file(log_file_path).unwrap();
+        remove_dir_all(db_path).unwrap();
     }
 }

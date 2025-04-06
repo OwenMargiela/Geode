@@ -12,9 +12,9 @@ pub const IS_ROOT_SIZE: usize = 1;
 pub const IS_ROOT_OFFSET: usize = 0;
 pub const NODE_TYPE_SIZE: usize = 1;
 pub const NODE_TYPE_OFFSET: usize = 1;
-pub const PARENT_POINTER_OFFSET: usize = 2;
-pub const PARENT_POINTER_SIZE: usize = PTR_SIZE; // 8
-pub const COMMON_NODE_HEADER_SIZE: usize = NODE_TYPE_SIZE + IS_ROOT_SIZE + PARENT_POINTER_SIZE;
+pub const POINTER_OFFSET: usize = 2; // Changed to contain the pointer of the current page
+pub const POINTER_SIZE: usize = PTR_SIZE; // 8 
+pub const COMMON_NODE_HEADER_SIZE: usize = NODE_TYPE_SIZE + IS_ROOT_SIZE + POINTER_SIZE;
 //               8                       =       1        +       1      +           8
 
 /// Leaf node header layout (Eighteen bytes in total)
@@ -59,6 +59,9 @@ pub const VALUE_SIZE: usize = 10;
 
 // RowID segment size
 pub const ROW_ID_SEGMENT_SIZE : usize = 4;
+
+// 4-Byte length 
+// pub const LENGTH_4_BYTE_SLICE: usize = 4;
 
 
 /// Wrappers for converting byte to bool and back.

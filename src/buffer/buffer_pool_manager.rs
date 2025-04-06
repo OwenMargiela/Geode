@@ -32,13 +32,12 @@ pub struct FrameHeader {
     pub page_id: PageId,
     pub file_id: FileId,
 
-    pub data: [u8;PAGE_SIZE],
+    pub data: [u8; PAGE_SIZE],
 }
 
 // Tracks page allocations in a File
 // Maps every page to possible allocated frame
 type FilePageMap = HashMap<PageId, Option<FrameId>>;
-
 
 pub struct BufferPoolManager {
     num_frames: usize,
@@ -121,10 +120,8 @@ impl BufferPoolManager {
 
         let manager = &self.manager;
         let mut manager_guard = manager.lock().unwrap();
-        dbg!("Aqquired manager guard used to create new page");
 
         let (page_id, _) = manager_guard.allocate_page(file_id);
-        dbg!("Dropping manager guard used to create new page");
 
         self.next_page_id.fetch_add(1, Ordering::Relaxed);
 
@@ -135,7 +132,7 @@ impl BufferPoolManager {
 
         // Inittialize Default Page
         {
-            println!("Initialize File {} Page {}", file_id, page_id);
+            dbg!(file_id, page_id);
 
             let buffer: Box<[u8]> = Box::new([0; PAGE_SIZE]);
             let mut page_buffer = Manager::aligned_buffer(&buffer);
@@ -201,17 +198,6 @@ impl BufferPoolManager {
         page_id: PageId,
         access_type: AccessType,
     ) -> Option<PageGuard> {
-        dbg!("Checking page");
-
-        match access_type {
-            AccessType::Read => {
-                dbg!("Reading");
-                if page_id == 13 {
-                    println!("\n\n\n Reading page ID {} \n\n\n", page_id);
-                }
-            }
-            _ => {}
-        }
         let frame_id: Option<u32>;
 
         {
@@ -222,14 +208,11 @@ impl BufferPoolManager {
 
         if frame_id.is_none() {
             // Cases
-            dbg!("Frame not initialized Page id not in memory");
 
             // 1.
             // Free frames are available no eviction needed
 
             if let Some(frame_id) = self.free_frames.lock().unwrap().pop_front() {
-                dbg!("Free frames are available no eviction needed");
-
                 self.init_frame_data(file_id, page_id, frame_id);
                 return Some(self.create_guard(frame_id, access_type));
             }
@@ -240,13 +223,10 @@ impl BufferPoolManager {
             // in a page of memory, using the replacement algorithm you implemented
             // previously to find candidate frames for eviction.
 
-            dbg!("Free frames not available eviction needed");
-
             let eviction_id = {
                 let mut replacer_guard = self.replacer.lock().unwrap();
                 replacer_guard.evict()? // Returns None as ther is no page to evict
             };
-            println!("Evicting {}", eviction_id);
 
             // Data to be evicticted needs to be persisted on disk
             // using the evict() function, obtain the frame_id and by extention the
@@ -256,8 +236,6 @@ impl BufferPoolManager {
             // to bring in the page of data we want into the frame. Flush the data of the frame to evicted to disk
 
             let mut frame_guard = self.frames.write().unwrap();
-
-            dbg!("Aqquired lock");
 
             let frame = frame_guard
                 .get_mut(&eviction_id)
@@ -280,8 +258,6 @@ impl BufferPoolManager {
                 evicted_page_guard.page_id,
                 &page_data,
             );
-
-            println!("Flush == {} ", res);
 
             drop(evicted_page_guard);
             drop(frame_guard);
@@ -307,7 +283,12 @@ impl BufferPoolManager {
         None
     }
 
-    pub fn flush_page_sync(&self, file_id: u64, page_id: PageId, frame_data: &[u8;PAGE_SIZE]) -> bool {
+    pub fn flush_page_sync(
+        &self,
+        file_id: u64,
+        page_id: PageId,
+        frame_data: &[u8; PAGE_SIZE],
+    ) -> bool {
         // Does file and page exist ?
 
         let exists = self
@@ -319,10 +300,8 @@ impl BufferPoolManager {
             .is_some();
 
         if !exists {
-            println!("Does not exist");
             return false;
         }
-        println!("exists == {}", exists);
 
         {
             let mut manager_guard = self.manager.lock().unwrap();
@@ -359,7 +338,6 @@ impl BufferPoolManager {
 
         // Write Request
         let page_data = Manager::aligned_buffer(&frame);
-        println!("Writing data {:?}\n\n", page_data);
         let request = DiskRequest {
             data: DiskData::Write(Some(page_data)), // Move the buffer
             done_flag: Arc::clone(&future.flag),
