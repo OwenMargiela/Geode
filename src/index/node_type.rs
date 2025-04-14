@@ -2,7 +2,7 @@ use std::cmp::{Eq, Ord, Ordering, PartialOrd};
 
 use super::errors::Error;
 
-#[derive(Clone, Copy, Eq, PartialEq, Debug)]
+#[derive(Clone, Copy, Eq, Debug, PartialEq, PartialOrd, Ord)]
 pub struct PageId(pub u64);
 
 #[derive(Clone, Eq, PartialEq, PartialOrd, Ord, Debug)]
@@ -128,7 +128,7 @@ pub enum NodeType {
 
 pub fn update_next_pointer(node: &mut NodeType, next_page_pointer: [u8; 8]) -> Result<(), Error> {
     match node {
-        NodeType::Leaf(_, next_pointer,_) => {
+        NodeType::Leaf(_, next_pointer, _) => {
             *next_pointer = NextPointer(Some(next_page_pointer));
             Ok(())
         }
@@ -150,8 +150,16 @@ pub fn update_next_pointer(node: &mut NodeType, next_page_pointer: [u8; 8]) -> R
 impl From<u8> for NodeType {
     fn from(orig: u8) -> NodeType {
         match orig {
-            0x01 => NodeType::Internal(Vec::<PageId>::new(), Vec::<Key>::new(),PageId(u64::default())),
-            0x02 => NodeType::Leaf(Vec::<KeyValuePair>::new(), NextPointer(None),PageId(u64::default())),
+            0x01 => NodeType::Internal(
+                Vec::<PageId>::new(),
+                Vec::<Key>::new(),
+                PageId(u64::default()),
+            ),
+            0x02 => NodeType::Leaf(
+                Vec::<KeyValuePair>::new(),
+                NextPointer(None),
+                PageId(u64::default()),
+            ),
             _ => NodeType::Unexpected,
         }
     }
@@ -161,8 +169,8 @@ impl From<u8> for NodeType {
 impl From<&NodeType> for u8 {
     fn from(orig: &NodeType) -> u8 {
         match orig {
-            NodeType::Internal(_, _,_) => 0x01,
-            NodeType::Leaf(_, _,_) => 0x02,
+            NodeType::Internal(_, _, _) => 0x01,
+            NodeType::Leaf(_, _, _) => 0x02,
             NodeType::Unexpected => 0x03,
         }
     }

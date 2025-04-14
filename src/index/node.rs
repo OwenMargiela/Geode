@@ -10,6 +10,11 @@ use super::node_type::{
     update_next_pointer, Key, KeyValuePair, NextPointer, NodeType, PageId, RowID,
 };
 
+/// NodeKeys are either guideposts in an internal node, or the actual kv pair in the leaf
+pub enum NodeKey {
+    GuidePostKey(Key),
+    KeyValuePair(KeyValuePair),
+}
 /// Node represents a node in the BTree occupied by a single page in memory.
 #[derive(Clone, Debug)]
 pub struct Node {
@@ -88,6 +93,16 @@ impl Node {
         }
     }
 
+    // Gets the length of the entry array in internal nodes and key-value arrays in the leaves
+    pub fn get_key_array_length(&self) -> usize {
+        match &self.node_type {
+            NodeType::Internal(_, keys, _) => keys.len(),
+            NodeType::Leaf(entries, _, _) => entries.len(),
+
+            NodeType::Unexpected => 0,
+        }
+    }
+
     /// split creates a sibling node from a given node by splitting the node in two around a median.
     /// split will split the child at b leaving the [0, b-1] keys
     /// while moving the set of [b, 2b-1] keys to the sibling.
@@ -136,6 +151,278 @@ impl Node {
             }
         }
     }
+
+    /// Inserts a key and pointer into an internal node
+    pub fn insert_sibling_node(&mut self, key: Key, child: PageId) -> Result<(), Error> {
+        match self.node_type {
+            NodeType::Internal(_, _, _) => {
+                self.insert_key(key)?;
+                self.insert_child_pointer(child)?;
+
+                Ok(())
+            }
+            _ => Err(Error::UnexpectedError),
+        }
+    }
+
+    /// Inserts a key into an internal node
+    pub fn insert_key(&mut self, key: Key) -> Result<(), Error> {
+        match self.node_type {
+            NodeType::Internal(_, ref mut keys, _) => {
+                let idx = keys.binary_search(&key).unwrap_or_else(|x| x);
+
+                keys.insert(idx, key);
+                Ok(())
+            }
+
+            _ => Err(Error::UnexpectedError),
+        }
+    }
+
+    /// Inserts a child pointer into an internal node
+    pub fn insert_child_pointer(&mut self, child: PageId) -> Result<(), Error> {
+        match self.node_type {
+            NodeType::Internal(ref mut children, _, _) => {
+                let idx = children.binary_search(&child).unwrap_or_else(|x| x);
+
+                children.insert(idx, child);
+                Ok(())
+            }
+
+            _ => Err(Error::UnexpectedError),
+        }
+    }
+
+    /// Gets a key at a certain index within an internal node
+    pub fn get_key_at_index(&mut self, idx: usize) -> Result<Key, Error> {
+        match &self.node_type {
+            NodeType::Internal(_, keys, _) => {
+                let key = keys.get(idx).unwrap().clone();
+                Ok(key)
+            }
+            _ => Err(Error::UnexpectedError),
+        }
+    }
+
+    /// Gets a key-value pair at a certain index within a Leaf node
+    pub fn get_key_value_at_index(&mut self, idx: usize) -> Result<KeyValuePair, Error> {
+        match &self.node_type {
+            NodeType::Leaf(entries, _, _) => {
+                let entry = entries.get(idx).unwrap().clone();
+                Ok(entry)
+            }
+            _ => Err(Error::UnexpectedError),
+        }
+    }
+
+    /// Inserts a key value pair entry into a leaf node
+    pub fn insert_entry(&mut self, entry: KeyValuePair) -> Result<(), Error> {
+        match self.node_type {
+            NodeType::Leaf(ref mut entries, _, _) => {
+                let key = entry.key;
+                let idx = entries
+                    .binary_search_by_key(&key, |p| p.key)
+                    .unwrap_or_else(|x| x);
+
+                entries.insert(idx, entry);
+
+                Ok(())
+            }
+
+            _ => Err(Error::UnexpectedError),
+        }
+    }
+
+    /// Removes a key value pair entry from a leaf node
+    pub fn remove_entry(&mut self, entry: KeyValuePair) -> Result<(), Error> {
+        match self.node_type {
+            NodeType::Leaf(ref mut entries, _, _) => {
+                let key = entry.key;
+                let idx = entries
+                    .binary_search_by_key(&key, |p| p.key)
+                    .unwrap_or_else(|x| x);
+
+                entries.remove(idx);
+
+                Ok(())
+            }
+
+            _ => Err(Error::UnexpectedError),
+        }
+    }
+
+    /// Removes a key from an internal node
+    pub fn remove_key(&mut self, key: Key) -> Result<(), Error> {
+        match self.node_type {
+            NodeType::Internal(ref mut children, ref mut keys, _) => {
+                let idx = keys.binary_search(&key).unwrap_or_else(|x| x);
+
+                keys.remove(idx);
+
+                children.remove(idx);
+
+                Ok(())
+            }
+
+            _ => Err(Error::UnexpectedError),
+        }
+    }
+
+    /// Removes a child pointer from an internal node
+    pub fn remove_child_pointer(&mut self, child: PageId) -> Result<(), Error> {
+        match self.node_type {
+            NodeType::Internal(ref mut children, _, _) => {
+                let idx = children.binary_search(&child).unwrap_or_else(|x| x);
+
+                children.remove(idx);
+                Ok(())
+            }
+
+            _ => Err(Error::UnexpectedError),
+        }
+    }
+
+    /// Removes a key and child pointer from an internal node
+    pub fn remove_sibling_node(&mut self, key: Key, child: PageId) -> Result<(), Error> {
+        match self.node_type {
+            NodeType::Internal(_, _, _) => {
+                self.remove_key(key)?;
+                self.remove_child_pointer(child)?;
+
+                Ok(())
+            }
+            _ => Err(Error::UnexpectedError),
+        }
+    }
+
+    /// Removes key and child pointers from internal nodes
+    pub fn remove_key_at_index(&mut self, idx: usize) -> Result<(Key, PageId), Error> {
+        match self.node_type {
+            NodeType::Internal(ref mut children, ref mut keys, _) => {
+                let key = keys.remove(idx);
+
+                let child_pointer = children.remove(idx);
+
+                Ok((key, child_pointer))
+            }
+
+            _ => Err(Error::UnexpectedError),
+        }
+    }
+
+    /// Removes key-value paries from leafe nodes
+    pub fn remove_key_value_at_index(&mut self, idx: usize) -> Result<KeyValuePair, Error> {
+        match self.node_type {
+            NodeType::Leaf(ref mut entries, _, _) => {
+                let entry = entries.remove(idx);
+
+                Ok(entry)
+            }
+
+            _ => Err(Error::UnexpectedError),
+        }
+    }
+
+    /// merges two internal nodes, it assumes the following:
+    /// 1. The two nodes are of the same parent.
+    /// 2. The two nodes do not accumulate to an overflow.
+    ///
+    /// Returns the min key, the max key and the new node
+    pub fn merge_internal(&mut self, sibling: Node) -> Result<Node, Error> {
+        match &self.node_type {
+            NodeType::Internal(children, keys, _) => {
+                if let NodeType::Internal(sibling_pointers, sibling_keys, _) = sibling.node_type {
+                    let merged_pointers: Vec<PageId> = children
+                        .iter()
+                        .chain(sibling_pointers.iter())
+                        .cloned()
+                        .collect();
+
+                    let merged_keys: Vec<Key> =
+                        keys.iter().chain(sibling_keys.iter()).cloned().collect();
+
+                    Ok(Node::new(
+                        NodeType::Internal(merged_pointers, merged_keys, PageId(u64::default())),
+                        PageId(u64::default()),
+                        false,
+                    ))
+                } else {
+                    Err(Error::UnexpectedError)
+                }
+            }
+
+            _ => Err(Error::UnexpectedError),
+        }
+    }
+
+    /// merges two leaf nodes, it assumes the following:
+    /// 1. The two nodes are of the same parent.
+    /// 2. The two nodes do not accumulate to an overflow.
+    ///
+    /// Returns the a new node
+    ///
+    pub fn merge_leaf(&mut self, sibling: Node) -> Result<Node, Error> {
+        match &self.node_type {
+            NodeType::Leaf(entries, _, _) => {
+                if let NodeType::Leaf(sibling_entries, sibling_next_pointer, _) = sibling.node_type
+                {
+                    let merged_entries: Vec<KeyValuePair> = entries
+                        .iter()
+                        .chain(sibling_entries.iter())
+                        .cloned()
+                        .collect();
+                    Ok(Node::new(
+                        NodeType::Leaf(
+                            merged_entries,
+                            sibling_next_pointer.clone(),
+                            PageId(u64::default()),
+                        ),
+                        PageId(u64::default()),
+                        false,
+                    ))
+                } else {
+                    Err(Error::UnexpectedError)
+                }
+            }
+            _ => Err(Error::UnexpectedError),
+        }
+    }
+
+    /// borrows from the sibling node
+    /// 1. The two nodes are of the same parent.
+    /// 2. The two nodes do not accumulate to an overflow.
+    /// 3. The two nodes are structure into the correct orientation
+    ///
+    /// 'Pops' the first (key, chil_pointer pair ) / ( key-value pair from the right sibling )
+    ///
+    ///
+    pub fn borrrow_from(&mut self, sibling: &mut Node) -> Result<NodeKey, Error> {
+        match &self.node_type {
+            NodeType::Internal(_, _, _) => {
+                if let NodeType::Internal(_, _, _) = sibling.node_type {
+                    let (key, child_pointer) = sibling.remove_key_at_index(0)?;
+                    self.insert_sibling_node(key, child_pointer)?;
+
+                    let key = sibling.get_key_at_index(0)?;
+                    return Ok(NodeKey::GuidePostKey(key));
+                } else {
+                    return Err(Error::UnexpectedError);
+                }
+            }
+            NodeType::Leaf(_, _, _) => {
+                if let NodeType::Internal(_, _, _) = sibling.node_type {
+                    let entry = sibling.remove_key_value_at_index(0)?;
+                    self.insert_entry(entry)?;
+
+                    let kv = sibling.get_key_value_at_index(0)?;
+                    return Ok(NodeKey::KeyValuePair(kv));
+                } else {
+                    return Err(Error::UnexpectedError);
+                }
+            }
+            _ => Err(Error::UnexpectedError),
+        }
+    }
 }
 
 impl TryFrom<BTreePage> for Node {
@@ -180,7 +467,7 @@ impl TryFrom<BTreePage> for Node {
 
                 Ok(Node::new(
                     NodeType::Internal(children, keys, pointer.unwrap()),
-                    PageId(u64::default()),
+                    pointer.unwrap(),
                     is_root,
                 ))
             }
@@ -401,6 +688,7 @@ mod tests {
         let key_two = serialize_int_to_10_bytes(3);
         let key_three = serialize_int_to_10_bytes(8);
 
+        // Assuming d = 2 and max capacity nodes
         let mut node = Node::new(
             NodeType::Internal(
                 vec![PageId(1), PageId(2), PageId(3), PageId(4)],
@@ -414,6 +702,7 @@ mod tests {
         let (median, mut sibling) = node.split(2)?;
 
         assert_eq!(median, Key(key_two));
+        println!("median {:?}", median);
 
         assert_eq!(
             node.node_type,
@@ -437,6 +726,12 @@ mod tests {
                 PageId(2_u32.try_into().unwrap())
             )
         );
+
+        println!("\n\n\n {:?}", sibling);
+
+        sibling.remove_key(Key(key_three))?;
+
+        println!("\n\n\n {:?}", sibling);
 
         Ok(())
     }

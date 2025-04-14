@@ -248,9 +248,9 @@ mod tests {
             NodeType::Leaf(
                 vec![kv_pair_one, kv_pair_two, kv_pair_three],
                 NextPointer(Some([0, 0, 0, 0, 0, 0, 0, 1])),
-                PageId(1_u32.try_into().unwrap()),
+                PageId(2_u32.try_into().unwrap()),
             ),
-            PageId(1_u32.try_into().unwrap()),
+            PageId(2_u32.try_into().unwrap()),
             true,
         );
 
@@ -260,8 +260,8 @@ mod tests {
         let data = Node::try_from(page)?;
 
         assert_eq!(data.is_root, some_leaf.is_root);
-        assert_eq!(data.pointer, some_leaf.pointer);
         assert_eq!(data.node_type, some_leaf.node_type);
+        assert_eq!(data.pointer, some_leaf.pointer);
 
         Ok(())
     }
@@ -287,21 +287,21 @@ mod tests {
             NodeType::Internal(
                 vec![PageId(1), PageId(2), PageId(3), PageId(4)],
                 vec![Key(key), Key(key_two), Key(key_three)],
-                PageId(1_u32.try_into().unwrap()),
+                PageId(2_u32.try_into().unwrap()),
             ),
-            PageId(1_u32.try_into().unwrap()),
+            PageId(2_u32.try_into().unwrap()),
             true,
         );
 
         // Serialize data
         let page = BTreePage::try_from(&node)?;
 
+        
         // Deserialize back the page
         let res = Node::try_from(page)?;
-
         assert_eq!(res.is_root, node.is_root);
+        assert_eq!(res.node_type, node.node_type);
         assert_eq!(res.pointer, node.pointer);
-        // assert_eq!(res.node_type, node.node_type);
 
         Ok(())
     }
