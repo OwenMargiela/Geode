@@ -163,7 +163,7 @@ impl TryFrom<&Node> for BTreePage {
                         page_offset += KEY_SIZE
                     }
                 }
-                println!("Current page in try from {:?}", current_page);
+
 
                 data[POINTER_OFFSET..POINTER_OFFSET + POINTER_SIZE]
                     .copy_from_slice(&current_page.0.to_le_bytes());
@@ -208,9 +208,6 @@ impl TryFrom<&Node> for BTreePage {
                     page_offset += VALUE_SIZE;
                 }
 
-                println!("Current page in try from {:?}", current_page);
-                println!("Current page in try from bytes {:?}", current_page.0.to_le_bytes());
-                
                 data[POINTER_OFFSET..POINTER_OFFSET + POINTER_SIZE]
                     .copy_from_slice(&current_page.0.to_le_bytes());
             }

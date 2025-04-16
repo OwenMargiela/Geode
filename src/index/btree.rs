@@ -1,4 +1,4 @@
-use std::{cell::RefCell, collections::VecDeque, vec};
+use std::{cell::RefCell, collections::VecDeque, fmt, vec};
 
 use crate::{
     buffer::buffer_pool_manager::{AccessType, BufferPoolManager, FileId},
@@ -15,16 +15,31 @@ use super::{
     node_type::{Key, KeyValuePair, NextPointer, NodeType, PageId},
 };
 
-pub struct WriteContextStack<'a> {
+pub struct MergeContextStack {
+    child: PageId,
+    is_left_sibling: Option<bool>,
+    sibling: Option<PageId>, // Node to borrow from or merge with
+}
+
+pub struct MergeContextGuardStack<'a> {
     child: WriteGuard<'a>,
     is_left_sibling: Option<bool>,
     sibling: Option<WriteGuard<'a>>, // Node to borrow from or merge with
 }
 
-pub struct ReadContextStack<'a> {
-    child: ReadGuard<'a>,
+pub struct ReadContextStack {
+    child: PageId,
 }
 
+pub struct ReadContextGuardStack<'a> {
+    child: WriteGuard<'a>,
+}
+pub struct WriteContextStack {
+    child: PageId,
+}
+pub struct WriteContextGuardStack<'a> {
+    child: WriteGuard<'a>,
+}
 /// Crabbing Protocols
 
 #[derive(Clone, Copy)]
@@ -38,15 +53,6 @@ pub enum WriteOperation {
     Insert,
 }
 
-/// Stack of latched Internal and Leaf nodes
-pub enum Set<'a> {
-    // Store the guards of the pages that you're modifying here.
-    WriteStack(VecDeque<WriteContextStack<'a>>),
-
-    // you may want to use this when getting a value, but not necessary
-    ReadStack(VecDeque<ReadContextStack<'a>>),
-}
-
 // Allow for interior mutability within the buffer pool
 // Flirt with the idea of using a closure to encapsulate all logic needed
 // for reads and writes if needed. Or if I remember >_<
@@ -57,17 +63,99 @@ pub struct BTree {
     d: usize,
     root_page_id: RefCell<PageId>,
 }
+/// Stack of latched Internal and Leaf nodes
+pub enum Set {
+    // Store the guards of the pages that you're modifying here.
+    WriteStack(VecDeque<WriteContextStack>),
 
-pub struct Context<'a> {
+    // you may want to use this when getting a value, but not necessary
+    ReadStack(VecDeque<ReadContextStack>),
+
+    MergeStack(VecDeque<MergeContextStack>),
+}
+
+pub enum GuardSet<'a> {
+    // Store the guards of the pages that you're modifying here.
+    WriteStack(VecDeque<WriteContextGuardStack<'a>>),
+
+    // you may want to use this when getting a value, but not necessary
+    ReadStack(VecDeque<ReadContextGuardStack<'a>>),
+
+    MergeStack(VecDeque<MergeContextGuardStack<'a>>),
+}
+
+pub struct GuardContext<'a> {
     // Save the root page id here so that it's easier to know if the current page is the root page.
     // This probaly should be a u32 instead of a u64
     root_page_id: PageId,
 
     // Store the ids of the pages that you're modifying here.
-    set: Set<'a>,
+    set: GuardSet<'a>,
 }
 
-impl<'a> Context<'a> {
+pub struct Context {
+    // Save the root page id here so that it's easier to know if the current page is the root page.
+    // This probaly should be a u32 instead of a u64
+    root_page_id: PageId,
+
+    // Store the ids of the pages that you're modifying here.
+    set: Set,
+}
+
+impl fmt::Debug for Context {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "Context {{ root_page_id: {:?}, ", self.root_page_id)?;
+
+        match &self.set {
+            Set::WriteStack(stack) => {
+                write!(f, "set: WriteStack ({} items)", stack.len())?;
+                write!(f, " [")?;
+                for item in stack {
+                    write!(f, " {:?} ", item.child);
+                }
+                write!(f, "] ")?;
+            }
+            Set::ReadStack(stack) => {
+                write!(f, "set: ReadStack ({} items)", stack.len())?;
+            }
+            Set::MergeStack(stack) => {
+                write!(f, "set: MergeStack ({} items)", stack.len())?;
+            }
+        }
+
+        write!(f, " }}")
+    }
+}
+
+impl<'a> Drop for GuardContext<'a> {
+    fn drop(&mut self) {
+        match &mut self.set {
+            GuardSet::WriteStack(write_stack) => {
+                while let Some(_ctx) = write_stack.pop_front() {
+                    drop(_ctx)
+                }
+            }
+            GuardSet::ReadStack(read_stack) => {
+                while let Some(_ctx) = read_stack.pop_front() {
+                    drop(_ctx.child);
+                    // ReadGuard will be dropped here
+                }
+            }
+            GuardSet::MergeStack(merge_stack) => {
+                while let Some(merge_ctx) = merge_stack.pop_back() {
+                    // Drop child guard
+                    drop(merge_ctx.child);
+                    // Drop sibling guard if exists
+                    if let Some(sibling) = merge_ctx.sibling {
+                        drop(sibling);
+                    }
+                }
+            }
+        }
+    }
+}
+
+impl Context {
     pub fn new(root_page_id: PageId, protocol: Protocol) -> Self {
         match protocol {
             Protocol::Exclusive => {
@@ -81,6 +169,26 @@ impl<'a> Context<'a> {
                 return Context {
                     root_page_id,
                     set: Set::ReadStack(VecDeque::new()),
+                }
+            }
+        }
+    }
+}
+
+impl<'a> GuardContext<'a> {
+    pub fn new(root_page_id: PageId, protocol: Protocol) -> Self {
+        match protocol {
+            Protocol::Exclusive => {
+                return GuardContext {
+                    root_page_id,
+                    set: GuardSet::WriteStack(VecDeque::new()),
+                }
+            }
+
+            Protocol::Shared => {
+                return GuardContext {
+                    root_page_id,
+                    set: GuardSet::ReadStack(VecDeque::new()),
                 }
             }
         }
@@ -165,7 +273,7 @@ impl BTree {
     pub fn is_node_full(&self, node: &Node) -> Result<bool, Error> {
         match &node.node_type {
             NodeType::Leaf(pairs, _, _) => Ok(pairs.len() == (2 * self.d)),
-            NodeType::Internal(_, keys, _) => Ok(keys.len() == (2 * self.d - 1)),
+            NodeType::Internal(_, keys, _) => Ok(keys.len() == (2 * self.d)),
             NodeType::Unexpected => {
                 println!("Unexpected error in is_node_full");
                 Err(Error::UnexpectedError)
@@ -185,8 +293,36 @@ impl BTree {
         }
     }
 
-    // Have this return successful and unsuccessful return values
-    // This does not return a write guard but writes a specific page to disk
+    // pub fn split_and_flush
+
+    pub fn flush_data(&self, node: &Node, page: u32) {
+        println!("\nObtaining write guard in flush data");
+        let guard = self.bpm.write_page(self.index_file_id, page);
+        let node_page = BTreePage::try_from(node).unwrap();
+
+        guard
+            .get_frame()
+            .data
+            .copy_from_slice(&node_page.get_data());
+
+        drop(guard);
+    }
+
+    pub fn new_root(&self, key: Key, left_child: PageId, right_child: PageId) {
+        let new_root_pointer = PageId(self.bpm.new_page(self.index_file_id).try_into().unwrap());
+
+        let new_root = Node::new(
+            NodeType::Internal(vec![left_child, right_child], vec![key], new_root_pointer),
+            new_root_pointer,
+            true,
+        );
+        let mut page = self.root_page_id.try_borrow_mut().unwrap();
+        *page = new_root_pointer;
+
+        println!("\n\n\nCheckpoint new rooot {:?}\n\n\n", new_root_pointer);
+
+        self.flush_data(&new_root, new_root_pointer.0.try_into().unwrap());
+    }
 
     pub fn get_gaurd(&self, page_id: PageId, acess_type: AccessType) -> Result<PageGuard, Error> {
         match acess_type {
@@ -241,6 +377,7 @@ impl BTree {
         }
     }
 
+    // obtains a latch on the parent
     pub fn match_protocol(&self, protocol: Protocol) -> Result<(Node, Context), Error> {
         let mut _btree_page: BTreePage = BTreePage {
             data: [0u8; PAGE_SIZE],
@@ -256,15 +393,16 @@ impl BTree {
                         self.index_file_id,
                         self.root_page_id.borrow().0.try_into().unwrap(),
                     ));
+
                     let write_guard = root_guard.into_write_guard().unwrap();
                     let page_data = write_guard.get_frame().data;
                     _btree_page = BTreePage::new(page_data);
 
+                    drop(write_guard);
+
                     if let Set::WriteStack(ref mut context_stack) = context.set {
                         context_stack.push_front(WriteContextStack {
-                            child: write_guard,
-                            sibling: None,
-                            is_left_sibling: None,
+                            child: self.root_page_id.borrow().clone(),
                         });
                     } else {
                         return Err(Error::UnexpectedError);
@@ -281,14 +419,19 @@ impl BTree {
                     let page_data = read_guard.get_frame().data;
                     _btree_page = BTreePage::new(page_data);
 
+                    drop(read_guard);
+
                     if let Set::ReadStack(ref mut context_stack) = context.set {
-                        context_stack.push_front(ReadContextStack { child: read_guard });
+                        context_stack.push_front(ReadContextStack {
+                            child: self.root_page_id.borrow().clone(),
+                        });
                     } else {
                         return Err(Error::UnexpectedError);
                     }
                 }
             }
         }
+
         let root_node = Node::try_from(_btree_page)?;
 
         Ok((root_node, context))
@@ -303,19 +446,20 @@ impl BTree {
         let (root_node, context) = self.match_protocol(protocol)?;
 
         let (leaf_node, context) =
-            self.latch_sub_tree(root_node, search_key, context, operation)?;
+            self.latch_sub_tree(root_node, search_key, context, Some(operation))?;
 
         Ok((leaf_node, context))
     }
 
     /// Descends towards the desired leaf node while aquiring read/write latches
+    /// Returns the gaurds of all the nodes needed for the operation
     pub fn latch_sub_tree<'a>(
         &'a self,
         parent: Node,
         search: Key,
-        mut context: Context<'a>,
-        operation: WriteOperation,
-    ) -> Result<(Node, Context<'a>), Error> {
+        mut context: Context,
+        operation: Option<WriteOperation>,
+    ) -> Result<(Node, Context), Error> {
         match &parent.node_type {
             NodeType::Internal(children, keys, _) => {
                 let idx = keys.binary_search(&search).unwrap_or_else(|x| x);
@@ -323,18 +467,51 @@ impl BTree {
 
                 match context.set {
                     Set::WriteStack(ref mut stack) => {
-                        let (child_node, child_guard) =
+                        let (child_node, _) =
                             self.get_node_obj(Protocol::Exclusive, child_pointer)?;
-                        let write_gaurd = child_guard.into_write_guard().expect("Page Gaurd");
+
+                        // let write_gaurd = child_guard.into_write_guard().expect("Page Gaurd");
 
                         let key_array_length = child_node.get_key_array_length();
                         let safe: bool;
 
                         // Check if node is safe
-                        if let WriteOperation::Insert = operation {
-                            safe = key_array_length + 1 == self.d * 2
+                        if let Some(WriteOperation::Insert) = operation {
+                            safe = key_array_length + 1 < self.d * 2
                         } else {
-                            safe = key_array_length - 1 == self.d - 1
+                            safe = key_array_length - 1 > self.d - 1
+                        }
+
+                        if safe {
+                            stack.pop_front();
+                            stack.push_front(WriteContextStack {
+                                child: child_pointer,
+                            });
+                        } else {
+                            println!("Not safe");
+                            stack.push_front(WriteContextStack {
+                                child: child_pointer,
+                            });
+                        }
+
+                        let (node, context) =
+                            self.latch_sub_tree(child_node, search, context, operation)?;
+                        return Ok((node, context));
+                    }
+
+                    Set::MergeStack(ref mut stack) => {
+                        let (child_node, _) =
+                            self.get_node_obj(Protocol::Exclusive, child_pointer)?;
+                        // let write_gaurd = child_guard.into_write_guard().expect("Page Gaurd");
+
+                        let key_array_length = child_node.get_key_array_length();
+                        let safe: bool;
+
+                        // Check if node is safe
+                        if let Some(WriteOperation::Insert) = operation {
+                            safe = key_array_length + 1 < self.d * 2
+                        } else {
+                            safe = key_array_length - 1 <= self.d - 1
                         }
 
                         if !safe {
@@ -348,20 +525,20 @@ impl BTree {
                             let (_, sibling_guard) =
                                 self.get_node_obj(Protocol::Exclusive, sibling_pointer)?;
 
-                            let sibling_gaurd =
+                            let _ =
                                 sibling_guard.into_write_guard().expect("Page Gaurd");
 
                             let is_left_sibling = idx > sibling_idx;
 
-                            stack.push_front(WriteContextStack {
-                                child: write_gaurd,
+                            stack.push_front(MergeContextStack {
+                                child: child_pointer,
                                 is_left_sibling: Some(is_left_sibling),
-                                sibling: Some(sibling_gaurd),
+                                sibling: Some(sibling_pointer),
                             });
                         } else {
                             stack.pop_front();
-                            stack.push_front(WriteContextStack {
-                                child: write_gaurd,
+                            stack.push_front(MergeContextStack {
+                                child: child_pointer,
                                 is_left_sibling: None,
                                 sibling: None,
                             });
@@ -373,11 +550,12 @@ impl BTree {
                     }
 
                     Set::ReadStack(ref mut stack) => {
-                        let (child_node, child_guard) =
-                            self.get_node_obj(Protocol::Shared, child_pointer)?;
-                        let read_gaurd = child_guard.into_read_guard().expect("Page Gaurd");
+                        let (child_node, _) = self.get_node_obj(Protocol::Shared, child_pointer)?;
+                        // let read_gaurd = child_guard.into_read_guard().expect("Page Gaurd");
 
-                        stack.push_front(ReadContextStack { child: read_gaurd });
+                        stack.push_front(ReadContextStack {
+                            child: child_pointer,
+                        });
 
                         let (node, context) =
                             self.latch_sub_tree(child_node, search, context, operation)?;
@@ -395,7 +573,187 @@ impl BTree {
         }
     }
 
+    pub fn propogate_upwards(&self, mut node: Node, mut context: Context) -> Result<(), Error> {
+        println!("\n\n\nPropogating upwards\n\n\n");
+
+        println!("Context when node split {:?}", context);
+
+        let mut was_root = node.is_root;
+
+        let page_id = match context.set {
+            Set::WriteStack(ref mut stack) => stack.pop_front().unwrap(),
+            _ => return Err(Error::UnexpectedError),
+        };
+
+        let (mut median, mut sibling) = node.split(self.d).unwrap();
+
+        sibling.set_page_pointer(PageId(
+            self.bpm.new_page(self.index_file_id).try_into().unwrap(),
+        ))?;
+
+        self.flush_data(&sibling, sibling.pointer.unwrap().0.try_into().unwrap());
+
+        self.flush_data(&node, page_id.child.0.try_into().unwrap());
+
+        if was_root {
+            self.new_root(median.clone(), page_id.child, sibling.pointer.unwrap());
+        }
+
+        // let mut context_stack =
+        //     GuardContext::new(self.root_page_id.borrow().clone(), Protocol::Exclusive);
+
+        // match context.set {
+        //     Set::WriteStack(ref mut stack) => {
+        //         while let Some(guard) = stack.pop_back() {
+        //             let write_page = self
+        //                 .bpm
+        //                 .write_page(self.index_file_id, guard.child.0.try_into().unwrap());
+
+        //             if let GuardSet::WriteStack(ref mut guard_stack) = context_stack.set {
+        //                 guard_stack.push_front(WriteContextGuardStack { child: write_page });
+        //             }
+        //         }
+        //     }
+        //     _ => return Err(Error::UnexpectedError),
+        // };
+
+        // Crabbing is hard and awkward 
+        // I will move on for the sake of my sanity 
+        loop {
+
+            let stack = match context.set {
+                Set::WriteStack(ref mut stack) => stack,
+                _ => return Err(Error::UnexpectedError),
+            };
+
+            // let stack = match context_stack.set {
+            //     GuardSet::WriteStack(ref mut stack) => stack,
+            //     _ => return Err(Error::UnexpectedError),
+            // };
+
+            let current_node_id = match stack.pop_front() {
+                Some(g) => g.child,
+                None => {
+                    drop(context);   
+                    return Ok(());
+                }
+            };
+
+            let current_node_guard =  self.bpm.write_page(self.index_file_id, current_node_id.0.try_into().unwrap());
+            let current_page = BTreePage::new(current_node_guard.get_frame().data);
+
+            let mut current_node = Node::try_from(current_page)?;
+
+            current_node.insert_sibling_node(median.clone(), sibling.pointer.unwrap())?;
+            
+            drop(current_node_guard);
+
+            // Insert into current with no split
+            if current_node.get_key_array_length() < 2 * self.d {
+                self.flush_data(
+                    &current_node,
+                    current_node.pointer.unwrap().0.try_into().unwrap(),
+                );
+                drop(context);
+                return Ok(());
+            }
+
+            // insert into current and split
+            was_root = current_node.is_root;
+
+            (median, sibling) = current_node.split(self.d)?;
+
+            sibling.set_page_pointer(PageId(
+                self.bpm.new_page(self.index_file_id).try_into().unwrap(),
+            ))?;
+
+            // Write current node to disk
+            self.flush_data(
+                &current_node,
+                current_node.pointer.unwrap().0.try_into().unwrap(),
+            );
+
+
+            // Writing leaf to disk
+            self.flush_data(&sibling, sibling.pointer.unwrap().0.try_into().unwrap());
+
+            // insert into current and split and current is root
+
+            if was_root {
+                
+                self.new_root(
+                    median.clone(),
+                    current_node.pointer.unwrap(),
+                    sibling.pointer.unwrap(),
+                );
+                return Ok(());
+            }
+            
+            // drop(context);
+            // drop(context_stack);
+        }
+    }
     
+    pub fn insert(&self, entry: KeyValuePair) -> Result<(), Error> {
+        let key = Key(entry.key);
+
+        let (mut leaf_node, mut context) =
+            self.tree_descent(key, Protocol::Exclusive, WriteOperation::Insert)?;
+
+        leaf_node.insert_entry(entry)?;
+
+        println!("Key length {}", leaf_node.get_key_array_length());
+        if leaf_node.get_key_array_length() < 2 * self.d {
+            let stack = match &mut context.set {
+                Set::WriteStack(stack) => stack,
+                _ => return Err(Error::UnexpectedError),
+            };
+
+            // Update the leaf_node data using the WriteGuard<'_>
+            let pointer = stack.pop_front().unwrap().child;
+            
+            self.flush_data(&leaf_node, pointer.0.try_into().unwrap());
+            
+            drop(context);
+            return Ok(());
+        } else if leaf_node.get_key_array_length() >= 2 * self.d {
+            self.propogate_upwards(leaf_node, context)?;
+        }
+        
+        Ok(())
+    }
+    
+        pub fn search(&self, search: Key) -> Result<KeyValuePair, Error> {
+            let (node, context) = self.match_protocol(Protocol::Shared)?;
+    
+            if let NodeType::Leaf(_, _, _) = node.node_type {
+                let kv_pair = node.find_key_value(search)?;
+                return Ok(kv_pair);
+            }
+            println!("Descending sub tree");
+            let (leaf, mut context) = self.latch_sub_tree(node, search.clone(), context, None)?;
+    
+            let stack = match &mut context.set {
+                Set::ReadStack(stack) => stack,
+                _ => return Err(Error::UnexpectedError),
+            };
+    
+            let _ = stack.pop_front().expect("Read_guard").child;
+    
+            let kv_pair = leaf.find_key_value(search.clone())?;
+    
+            drop(context);
+            return Ok(kv_pair);
+        }
+
+    pub fn get_value(&self, search: Key) -> Result<Key, Error> {
+        let key = self.search(search)?.key;
+        Ok(Key(key))
+    }
+
+    pub fn get_entry(&self, search: Key) -> Result<KeyValuePair, Error> {
+        Ok(self.search(search)?)
+    }
 
     /// Returns true if the tree has a 0 keys and values.
     fn is_empty() -> bool {
@@ -411,170 +769,3 @@ impl BTree {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use std::{
-        fs::{remove_dir_all, remove_file},
-        path::PathBuf,
-    };
-
-    #[test]
-    fn teardown() {
-        let log_file_path = PathBuf::from("log_file_path.bin");
-        let db_path = PathBuf::from("geodeData");
-        remove_file(log_file_path).unwrap();
-        remove_dir_all(db_path).unwrap();
-    }
-}
-
-// Next pointer is currently 8 bytes when it really should be 8
-
-/*
-
-//Inserts a key-value pair into the b+ tree object
- pub fn insert_split_protocol(&mut self, search: KeyValuePair) -> Result<(), Error> {
-     let mut context = Context::new(*self.root_page_id.borrow());
-     let mut node: Node;
-
-     {
-         let page_data = self.bpm.write_page(
-             self.index_file_id,
-             self.root_page_id.borrow().0.try_into().unwrap(),
-         );
-
-         let btree_page = BTreePage::new(page_data.get_frame().data);
-         node = Node::try_from(btree_page)?;
-
-         context.write_set.push_front(page_data);
-     }
-
-     Ok(())
- }
-
-
- choose_sub_tree_ex (recursively) finds a node rooted at a given non-full node while obtaining exclusive latches.
- to insert a given key-value pair. Here we assume the node is
- already a copy of an existing node in a copy-on-write root to node traversal.
-
- pub fn choose_sub_tree_ex<'a>(
-     &'a self,
-     node: &mut Node,
-     // node_pointer: PageId,
-     search: KeyValuePair,
-     mut context: Context<'a>,
- ) -> Result<(), Error> {
-     match node.node_type {
-         NodeType::Internal(ref child_pointers, ref keys, current_page) => {
-             // Binary search is great because event if a specifc key isn't in the keys array
-             // it returns the idx of of where the key should be inserted to maintain sort order
-
-             let idx = keys.binary_search(&Key(search.key)).unwrap_or_else(|x| x);
-
-             let child_pointer = child_pointers.get(idx).ok_or(Error::UnexpectedError)?;
-
-             // aqquire an exclusive or shared latch depending on the protocol
-             let child_page_guard = {
-                 self.bpm
-                 .write_page(self.index_file_id, child_pointer.0.try_into().unwrap())
-             };
-
-         let child_btree_page = BTreePage::new(child_page_guard.get_frame().data);
-         let mut child_node = Node::try_from(child_btree_page)?;
-
-         // Pesismistic lock control.
-         // We first check if nodes are 'safe'
-         // That is will this split on a newly inserted key? i.e Is it full
-
-             if !self.is_node_full(&child_node)? {
-                 // If it is not full we drop the parent
-                 // once popped, the page guard should fall out of scope
-                 let parent = context.write_set.pop_back().unwrap();
-                 drop(parent);
-             }
-
-             // We still aqquire the write guard child node
-             context.write_set.push_front(child_page_guard);
-
-             self.choose_sub_tree_ex(
-                 &mut child_node,
-                 // child_pointer.clone(),
-                 search,
-                 context,
-                 // Protocol::InsertSplit, // Continue with Pesimistic latching until leaf node
-             )?;
-
-             Ok(())
-         }
-         // The root node might be the leaf
-         NodeType::Leaf(ref mut pairs, _, curren_page) => {
-             let key = search.key;
-             let idx = pairs
-                 .binary_search_by_key(&key, |pair| pair.key.clone())
-                 .unwrap_or_else(|x| x);
-
-             // If the key already exists, reject the value
-             if idx < pairs.len() && pairs[idx].key == key {
-                 return Err(Error::DuplicateKey);
-             } else {
-                 // New key needs to be inserted
-                 if pairs.len() == (2 * self.d) {
-                     // Node is full, need to split
-
-                     let (median, sibling) = node.split(self.d)?;
-
-                     let sibling_pointer: PageId = sibling.get_pointer()?;
-                     node.set_next_pointer(sibling_pointer.0.to_le_bytes())?;
-
-                     let node_pointer: PageId = node.get_pointer()?;
-
-                     let new_root = self.bpm.new_page(self.index_file_id);
-                     let new_root_node = Node::new(
-                         NodeType::Internal(
-                             vec![node_pointer, sibling_pointer],
-                             vec![median],
-                             PageId(new_root.try_into().unwrap()),
-                         ),
-                         PageId(new_root.try_into().unwrap()),
-                         true,
-                     );
-                     // Write updated node back to disk
-                     self.pg_write_helper(&PageId(new_root.into()), &new_root_node);
-
-                     // Write node data to disk
-                     self.pg_write_helper(&node_pointer, &node);
-
-                     // Write node and sibling data to disk
-                     self.pg_write_helper(&sibling_pointer, &sibling);
-
-                     // self.root_page_id = PageId(new_root.into());
-                     let mut root = self.root_page_id.borrow_mut();
-                     *root = PageId(new_root.into());
-
-                     // retro actively split parent nodes
-                     // nodes are arranged in the manner
-
-                     //   node -> node' -> node'' -> node ''' -> ... ->    node 'n
-                     // | Leaf  |                                       |  root    |
-
-                     while let Some(node) = context.write_set.pop_front() {}
-                 } else {
-                     // Node has space, just insert
-                     // TODO: Insert logic here
-
-                     pairs.insert(idx, search);
-                     let node_pointer: PageId = node.get_pointer()?;
-                     // No longer doing copy on write. Therefore the node should have data on its page_id
-                     self.pg_write_helper(&node_pointer, &node);
-
-                     // Clear write set after operation is complete
-                     context.write_set.clear();
-                 }
-             }
-
-             return Ok(());
-         }
-         _ => return Err(Error::UnexpectedError),
-     }
- }
-
- */

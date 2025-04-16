@@ -39,6 +39,16 @@ pub struct FrameHeader {
 // Maps every page to possible allocated frame
 type FilePageMap = HashMap<PageId, Option<FrameId>>;
 
+pub struct FramesWrapper {
+    pub inner: Arc<RwLock<LinkedHashMap<FrameId, Option<RwLock<FrameHeader>>>>>,
+}
+
+impl Drop for FramesWrapper {
+    fn drop(&mut self) {
+        println!("🔽 FramesWrapper is being dropped. Remaining frames: {}", self.inner.read().unwrap().len());
+    }
+}
+
 pub struct BufferPoolManager {
     num_frames: usize,
     next_page_id: AtomicU32,
@@ -388,19 +398,30 @@ impl BufferPoolManager {
         };
 
         {
+
             let mut file_page_map_gaurd = self.file_page_map.write().unwrap();
 
             let file_map = file_page_map_gaurd.get_mut(&file_id).unwrap();
+            
 
             // Maps the Page_ID to a Frame_Id
             file_map.insert(page_id, Some(frame_id));
         }
+       
 
         // Update a Shared frame to a non None value
-        self.frames
-            .write()
-            .unwrap()
-            .insert(frame_id, Some(RwLock::new(frame)));
+        println!("Done");
+        println!("Frame number {}", frame_id);
+        let mut frame_guard = self.frames
+            .try_write()
+            .unwrap();
+
+        frame_guard.insert(frame_id, Some(RwLock::new(frame)));
+        drop(frame_guard);
+
+        println!("Dropped gaurd in frame");
+
+
     }
 
     fn create_guard(&self, frame_id: FrameId, access_type: AccessType) -> PageGuard {
@@ -422,9 +443,14 @@ impl BufferPoolManager {
     }
 
     pub fn write_page(&self, file_id: u64, page_id: PageId) -> WriteGuard {
+
+        println!("Trying to obtain lock on {}", page_id);
+
         let guard = self
             .check_write_page(file_id, page_id)
             .expect("Write lock error");
+
+            println!(" obtained lock on {}", page_id);
 
         guard
     }

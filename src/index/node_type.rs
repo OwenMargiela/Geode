@@ -24,7 +24,7 @@ impl Key {
     }
 }
 
-#[derive(Clone, Eq, PartialEq, Debug)]
+#[derive(Clone, Copy, Eq, PartialEq, Debug)]
 // Page Number and Slot Index
 pub struct RowID {
     pub page_id: [u8; 4],
@@ -70,7 +70,7 @@ impl RowID {
     }
 }
 
-#[derive(Clone, Eq, Debug)]
+#[derive(Clone, Copy, Eq, Debug)]
 pub struct KeyValuePair {
     pub key: [u8; 10], // Changed from String to Vec<u8>
     pub value: RowID,

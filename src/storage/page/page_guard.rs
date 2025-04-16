@@ -94,6 +94,8 @@ impl<'a> Drop for FrameGuard<'a> {
         frame.is_dirty = false.into();
 
         (self.on_drop)(self.frame_id, true);
+
+        println!("Dropping {}", self.frame_id);
     }
 }
 

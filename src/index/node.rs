@@ -119,6 +119,7 @@ impl Node {
                 // Populate siblings children.
                 let sibling_children = children.split_off(b);
 
+                self.is_root = false;
                 Ok((
                     median_key,
                     Node::new(
@@ -134,6 +135,7 @@ impl Node {
                 let sibling_pair = pairs.split_off(b);
                 // copy median key.
                 let median_pair = pairs.get(b - 1).ok_or(Error::UnexpectedError)?.clone();
+                self.is_root = false;
 
                 Ok((
                     Key(median_pair.key),
@@ -194,7 +196,7 @@ impl Node {
     }
 
     /// Gets a key at a certain index within an internal node
-    pub fn get_key_at_index(&mut self, idx: usize) -> Result<Key, Error> {
+    pub fn get_key_at_index(&self, idx: usize) -> Result<Key, Error> {
         match &self.node_type {
             NodeType::Internal(_, keys, _) => {
                 let key = keys.get(idx).unwrap().clone();
@@ -204,12 +206,41 @@ impl Node {
         }
     }
 
+    // finds the key in an internal node
+    pub fn find_key(&self, key: Key) -> Result<Key, Error> {
+        match &self.node_type {
+            NodeType::Internal(_, keys, _) => {
+                let idx = keys.binary_search(&key).unwrap().clone();
+
+                Ok(keys.get(idx).unwrap().clone())
+            }
+            _ => Err(Error::UnexpectedError),
+        }
+    }
+
     /// Gets a key-value pair at a certain index within a Leaf node
-    pub fn get_key_value_at_index(&mut self, idx: usize) -> Result<KeyValuePair, Error> {
+    pub fn get_key_value_at_index(&self, idx: usize) -> Result<KeyValuePair, Error> {
         match &self.node_type {
             NodeType::Leaf(entries, _, _) => {
                 let entry = entries.get(idx).unwrap().clone();
                 Ok(entry)
+            }
+            _ => Err(Error::UnexpectedError),
+        }
+    }
+
+    /// finds a key-value pair within a Leaf node
+    pub fn find_key_value(&self, key: Key) -> Result<KeyValuePair, Error> {
+        match &self.node_type {
+            NodeType::Leaf(entries, _, _) => {
+                let idx = entries
+                    .binary_search_by_key(&key, |p| Key(p.key))
+                    .unwrap_or_else(|x| x)
+                    .clone();
+                match entries.get(idx) {
+                    None => return Err(Error::KeyNotFound),
+                    Some(entry) => return Ok(entry.clone()),
+                }
             }
             _ => Err(Error::UnexpectedError),
         }
@@ -223,6 +254,10 @@ impl Node {
                 let idx = entries
                     .binary_search_by_key(&key, |p| p.key)
                     .unwrap_or_else(|x| x);
+
+                if Some(&entry) == entries.get(idx) {
+                    return Err(Error::KeyAlreadyExists);
+                }
 
                 entries.insert(idx, entry);
 
@@ -432,8 +467,6 @@ impl TryFrom<BTreePage> for Node {
         let raw = page.get_data();
         let node_type = NodeType::from(raw[NODE_TYPE_OFFSET]);
 
-        println!("Node type in try from {:?}", node_type);
-
         let is_root = raw[IS_ROOT_OFFSET].from_byte();
         let pointer: Option<PageId>;
 
@@ -442,7 +475,6 @@ impl TryFrom<BTreePage> for Node {
                 .try_into()
                 .unwrap(),
         )));
-        println!("Current Pointer {:?}", pointer);
 
         match node_type {
             NodeType::Internal(mut children, mut keys, _) => {

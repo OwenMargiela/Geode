@@ -7,7 +7,8 @@ pub enum Error {
     ValueOverflowError,
     TryFromSliceError(&'static str),
     UTF8Error,
-    DuplicateKey
+    DuplicateKey,
+    UnableToObtaineGuard
 }
 
 impl std::convert::From<std::io::Error> for Error {
