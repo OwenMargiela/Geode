@@ -23,6 +23,11 @@ pub struct Node {
     pub pointer: Option<PageId>,
 }
 
+pub enum Policy {
+    merge,
+    borrow,
+}
+
 impl Node {
     pub fn new(node_type: NodeType, page_pointer: PageId, is_root: bool) -> Node {
         Node {
@@ -66,8 +71,10 @@ impl Node {
         let mut node_type = self.node_type.clone();
 
         match node_type {
-            NodeType::Leaf(_, _, _) => {
-                update_next_pointer(&mut node_type, next_page_pointer).unwrap();
+            NodeType::Leaf(_, ref mut next, _) => {
+                *next = NextPointer(Some(next_page_pointer));
+
+                // update_next_pointer(&mut node_type, next_page_pointer).unwrap();
                 Ok(())
             }
             _ => Err(Error::UnexpectedError),
@@ -103,6 +110,17 @@ impl Node {
         }
     }
 
+    pub fn get_number_of_children(&self) -> Result<usize, Error> {
+        match &self.node_type {
+            NodeType::Internal(children, _, _) => {
+                return Ok(children.len());
+            }
+            _ => {
+                return Err(Error::UnexpectedError);
+            }
+        }
+    }
+
     /// split creates a sibling node from a given node by splitting the node in two around a median.
     /// split will split the child at b leaving the [0, b-1] keys
     /// while moving the set of [b, 2b-1] keys to the sibling.
@@ -111,13 +129,14 @@ impl Node {
         match self.node_type {
             NodeType::Internal(ref mut children, ref mut keys, _) => {
                 // Populate siblings keys.
-                let mut sibling_keys = keys.split_off(b - 1);
+                let mut sibling_keys = keys.split_off(b);
 
                 // Pop median key - to be added to the parent..
                 let median_key = sibling_keys.remove(0);
 
                 // Populate siblings children.
-                let sibling_children = children.split_off(b);
+
+                let sibling_children = children.split_off(b + 1);
 
                 self.is_root = false;
                 Ok((
@@ -133,8 +152,9 @@ impl Node {
             NodeType::Leaf(ref mut pairs, _, current_page) => {
                 // Populate siblings pairs
                 let sibling_pair = pairs.split_off(b);
+
                 // copy median key.
-                let median_pair = pairs.get(b - 1).ok_or(Error::UnexpectedError)?.clone();
+                let median_pair = sibling_pair.get(0).ok_or(Error::UnexpectedError)?.clone();
                 self.is_root = false;
 
                 Ok((
@@ -230,16 +250,34 @@ impl Node {
     }
 
     /// finds a key-value pair within a Leaf node
-    pub fn find_key_value(&self, key: Key) -> Result<KeyValuePair, Error> {
+    pub fn find_key_value(&self, key: &Key) -> Result<KeyValuePair, Error> {
         match &self.node_type {
             NodeType::Leaf(entries, _, _) => {
-                let idx = entries
-                    .binary_search_by_key(&key, |p| Key(p.key))
-                    .unwrap_or_else(|x| x)
-                    .clone();
+                println!("Checkpoint 1");
+                let was_found = entries.binary_search_by_key(key, |p| Key(p.key));
+
+                println!("Checkpoint 2");
+                let idx = match was_found {
+                    Ok(idx) => {
+                        println!("\n\n\nWas found {}", was_found.unwrap());
+                        idx
+                    }
+                    Err(_) => return Err(Error::KeyNotFound),
+                };
+
+                println!("Checkpoint 3");
+
                 match entries.get(idx) {
-                    None => return Err(Error::KeyNotFound),
-                    Some(entry) => return Ok(entry.clone()),
+                    None => {
+                        return {
+                            println!("Printing error");
+                            Err(Error::KeyNotFound)
+                        }
+                    }
+                    Some(entry) => {
+                        println!("Checkpoint 4 Entry {:?}", entry);
+                        return Ok(entry.clone());
+                    }
                 }
             }
             _ => Err(Error::UnexpectedError),
@@ -269,12 +307,11 @@ impl Node {
     }
 
     /// Removes a key value pair entry from a leaf node
-    pub fn remove_entry(&mut self, entry: KeyValuePair) -> Result<(), Error> {
+    pub fn remove_entry(&mut self, key: &Key) -> Result<(), Error> {
         match self.node_type {
             NodeType::Leaf(ref mut entries, _, _) => {
-                let key = entry.key;
                 let idx = entries
-                    .binary_search_by_key(&key, |p| p.key)
+                    .binary_search_by_key(key, |p| Key(p.key))
                     .unwrap_or_else(|x| x);
 
                 entries.remove(idx);
@@ -293,8 +330,6 @@ impl Node {
                 let idx = keys.binary_search(&key).unwrap_or_else(|x| x);
 
                 keys.remove(idx);
-
-                children.remove(idx);
 
                 Ok(())
             }
@@ -331,12 +366,22 @@ impl Node {
     }
 
     /// Removes key and child pointers from internal nodes
-    pub fn remove_key_at_index(&mut self, idx: usize) -> Result<(Key, PageId), Error> {
+    ///
+    /// The take right bool parameter controls wether to take the child pointer to the keys left or right
+    pub fn remove_key_at_index(
+        &mut self,
+        idx: usize,
+        take_right: bool,
+    ) -> Result<(Key, PageId), Error> {
         match self.node_type {
             NodeType::Internal(ref mut children, ref mut keys, _) => {
                 let key = keys.remove(idx);
-
-                let child_pointer = children.remove(idx);
+                let child_pointer: PageId;
+                if take_right {
+                    child_pointer = children.remove(idx + 1);
+                } else {
+                    child_pointer = children.remove(idx);
+                }
 
                 Ok((key, child_pointer))
             }
@@ -345,7 +390,7 @@ impl Node {
         }
     }
 
-    /// Removes key-value paries from leafe nodes
+    /// Removes key-value pairs from leaf nodes
     pub fn remove_key_value_at_index(&mut self, idx: usize) -> Result<KeyValuePair, Error> {
         match self.node_type {
             NodeType::Leaf(ref mut entries, _, _) => {
@@ -358,29 +403,216 @@ impl Node {
         }
     }
 
-    /// merges two internal nodes, it assumes the following:
+    pub fn pop_front(&mut self) -> Result<(NodeKey, NodeKey, Option<PageId>), Error> {
+        match &self.node_type {
+            NodeType::Internal(_, keys, _) => {
+                let len = keys.len();
+                let promotion_key = keys.get(len - 1).unwrap().clone();
+                let (key, page_id) = self.remove_key_at_index(0, false)?;
+
+                return Ok((
+                    NodeKey::GuidePostKey(key),
+                    NodeKey::GuidePostKey(promotion_key),
+                    Some(page_id),
+                ));
+            }
+            NodeType::Leaf(entries, _, _) => {
+                let len = entries.len();
+                let promotion_key = entries.get(len - 1).unwrap().clone();
+                let entry = self.remove_key_value_at_index(0)?;
+
+                return Ok((
+                    NodeKey::KeyValuePair(entry),
+                    NodeKey::KeyValuePair(promotion_key),
+                    None,
+                ));
+            }
+            NodeType::Unexpected => {
+                return Err(Error::UnexpectedError);
+            }
+        }
+    }
+
+    pub fn pop_back(&mut self) -> Result<(NodeKey, NodeKey, Option<PageId>), Error> {
+        match self.node_type {
+            NodeType::Internal(_, ref mut keys, _) => {
+                println!("\n\nKeys in pop back{:?}", keys);
+                let len = keys.len();
+                let promotion_key = keys.get(0).unwrap().clone();
+                let (key, page_id) = self.remove_key_at_index(len - 1, true)?;
+                return Ok((
+                    NodeKey::GuidePostKey(key),
+                    NodeKey::GuidePostKey(promotion_key),
+                    Some(page_id),
+                ));
+            }
+            NodeType::Leaf(ref mut entries, _, _) => {
+                println!("\n\nEntries in pop back{:?}", entries);
+                let len = entries.len();
+                let promotion_key = entries.get(0).unwrap().clone();
+                let entry = self.remove_key_value_at_index(len)?;
+
+                return Ok((
+                    NodeKey::KeyValuePair(entry),
+                    NodeKey::KeyValuePair(promotion_key),
+                    None,
+                ));
+            }
+            NodeType::Unexpected => {
+                return Err(Error::UnexpectedError);
+            }
+        }
+    }
+
+    pub fn find_and_update_key(&mut self, search_key: Key, update_key: Key) -> Result<(), Error> {
+        match self.node_type {
+            NodeType::Internal(_, ref mut keys, _) => {
+                let idx = keys.binary_search(&search_key).unwrap_or_else(|x| x);
+                keys[idx] = update_key;
+
+                return Ok(());
+            }
+            _ => {
+                return Err(Error::UnexpectedError);
+            }
+        }
+    }
+
+    pub fn borrow(
+        &mut self,
+        current_parent_node: &mut Node,
+        current_candidate: &mut Node,
+        is_left: bool,
+        separator_key: Key,
+    ) -> Result<(), Error> {
+        match self.node_type {
+            NodeType::Leaf(_, _, _) => {
+                let promotion_key: Key;
+
+                if is_left {
+                    let popped = current_candidate.pop_back()?;
+
+                    // Remove the right most value
+                    match popped {
+                        (
+                            NodeKey::KeyValuePair(right_most_entry),
+                            NodeKey::KeyValuePair(promotion),
+                            _,
+                        ) => {
+                            // Set promotion key
+                            promotion_key = Key(promotion.key.clone());
+                            self.insert_entry(right_most_entry)?;
+                        }
+                        _ => {
+                            // This should never happen if the tree is consistent
+                            return Err(Error::UnexpectedError);
+                        }
+                    }
+                } else {
+                    let popped = current_candidate.pop_front()?;
+
+                    // Remove the left most value
+                    match popped {
+                        (
+                            NodeKey::KeyValuePair(left_most_entry),
+                            NodeKey::KeyValuePair(promotion),
+                            _,
+                        ) => {
+                            // Set promotion key
+                            promotion_key = Key(promotion.key.clone());
+                            self.insert_entry(left_most_entry)?;
+                        }
+                        _ => {
+                            // This should never happen if the tree is consistent
+                            return Err(Error::UnexpectedError);
+                        }
+                    }
+                }
+
+                // Update the separator key
+                current_parent_node.find_and_update_key(separator_key, promotion_key)?;
+
+                return Ok(());
+            }
+            NodeType::Internal(_, _, _) => {
+                let promotion_key: Key;
+                if is_left {
+                    let popped = current_candidate.pop_back()?;
+
+                    // Remove the right most value
+                    match popped {
+                        (
+                            NodeKey::GuidePostKey(right_most_key),
+                            NodeKey::GuidePostKey(_),
+                            Some(child_pointer),
+                        ) => {
+                            // Set promotion key
+                            promotion_key = right_most_key;
+                            self.insert_child_pointer(child_pointer)?;
+                            self.insert_key(separator_key.clone())?;
+                        }
+                        _ => {
+                            // This should never happen if the tree is consistent
+                            return Err(Error::UnexpectedError);
+                        }
+                    }
+                } else {
+                    let popped = current_candidate.pop_front()?;
+
+                    // Remove the left most value
+                    match popped {
+                        (
+                            NodeKey::GuidePostKey(left_most_key),
+                            NodeKey::GuidePostKey(_),
+                            Some(child_pointer),
+                        ) => {
+                            // Set promotion key
+                            promotion_key = left_most_key;
+                            self.insert_child_pointer(child_pointer)?;
+                            self.insert_key(separator_key.clone())?;
+                        }
+                        _ => {
+                            // This should never happen if the tree is consistent
+                            return Err(Error::UnexpectedError);
+                        }
+                    }
+                }
+
+                // Update the separator key
+                current_parent_node.find_and_update_key(separator_key, promotion_key)?;
+
+                // Write updates to disk
+                return Ok(());
+            }
+            _ => return Err(Error::UnexpectedError),
+        }
+    }
+    /// merges the sibling node into self, it assumes the following:
     /// 1. The two nodes are of the same parent.
     /// 2. The two nodes do not accumulate to an overflow.
     ///
-    /// Returns the min key, the max key and the new node
-    pub fn merge_internal(&mut self, sibling: Node) -> Result<Node, Error> {
-        match &self.node_type {
-            NodeType::Internal(children, keys, _) => {
-                if let NodeType::Internal(sibling_pointers, sibling_keys, _) = sibling.node_type {
-                    let merged_pointers: Vec<PageId> = children
+    ///
+    pub fn merge_internal(&mut self, sibling: &Node) -> Result<(), Error> {
+        match self.node_type {
+            NodeType::Internal(ref mut children, ref mut keys, _) => {
+                if let NodeType::Internal(sibling_pointers, sibling_keys, _) = &sibling.node_type {
+                    let mut merged_pointers: Vec<PageId> = children
                         .iter()
                         .chain(sibling_pointers.iter())
                         .cloned()
                         .collect();
 
-                    let merged_keys: Vec<Key> =
+                    let mut merged_keys: Vec<Key> =
                         keys.iter().chain(sibling_keys.iter()).cloned().collect();
 
-                    Ok(Node::new(
-                        NodeType::Internal(merged_pointers, merged_keys, PageId(u64::default())),
-                        PageId(u64::default()),
-                        false,
-                    ))
+                    // Is not viable for large sets
+                    merged_pointers.sort();
+                    merged_keys.sort();
+
+                    *children = merged_pointers;
+                    *keys = merged_keys;
+
+                    Ok(())
                 } else {
                     Err(Error::UnexpectedError)
                 }
@@ -396,63 +628,25 @@ impl Node {
     ///
     /// Returns the a new node
     ///
-    pub fn merge_leaf(&mut self, sibling: Node) -> Result<Node, Error> {
-        match &self.node_type {
-            NodeType::Leaf(entries, _, _) => {
-                if let NodeType::Leaf(sibling_entries, sibling_next_pointer, _) = sibling.node_type
-                {
-                    let merged_entries: Vec<KeyValuePair> = entries
+    pub fn merge_leaf(&mut self, sibling: &Node) -> Result<(), Error> {
+        match self.node_type {
+            NodeType::Leaf(ref mut entries, ref mut current_next, _) => {
+                if let NodeType::Leaf(sibling_entries, sibling_next, _) = &sibling.node_type {
+                    let mut merged_entries: Vec<KeyValuePair> = entries
                         .iter()
                         .chain(sibling_entries.iter())
                         .cloned()
                         .collect();
-                    Ok(Node::new(
-                        NodeType::Leaf(
-                            merged_entries,
-                            sibling_next_pointer.clone(),
-                            PageId(u64::default()),
-                        ),
-                        PageId(u64::default()),
-                        false,
-                    ))
+
+                    // Is not viable for large sets
+                    merged_entries.sort();
+
+                    *entries = merged_entries;
+                    *current_next = sibling_next.clone();
+
+                    Ok(())
                 } else {
                     Err(Error::UnexpectedError)
-                }
-            }
-            _ => Err(Error::UnexpectedError),
-        }
-    }
-
-    /// borrows from the sibling node
-    /// 1. The two nodes are of the same parent.
-    /// 2. The two nodes do not accumulate to an overflow.
-    /// 3. The two nodes are structure into the correct orientation
-    ///
-    /// 'Pops' the first (key, chil_pointer pair ) / ( key-value pair from the right sibling )
-    ///
-    ///
-    pub fn borrrow_from(&mut self, sibling: &mut Node) -> Result<NodeKey, Error> {
-        match &self.node_type {
-            NodeType::Internal(_, _, _) => {
-                if let NodeType::Internal(_, _, _) = sibling.node_type {
-                    let (key, child_pointer) = sibling.remove_key_at_index(0)?;
-                    self.insert_sibling_node(key, child_pointer)?;
-
-                    let key = sibling.get_key_at_index(0)?;
-                    return Ok(NodeKey::GuidePostKey(key));
-                } else {
-                    return Err(Error::UnexpectedError);
-                }
-            }
-            NodeType::Leaf(_, _, _) => {
-                if let NodeType::Internal(_, _, _) = sibling.node_type {
-                    let entry = sibling.remove_key_value_at_index(0)?;
-                    self.insert_entry(entry)?;
-
-                    let kv = sibling.get_key_value_at_index(0)?;
-                    return Ok(NodeKey::KeyValuePair(kv));
-                } else {
-                    return Err(Error::UnexpectedError);
                 }
             }
             _ => Err(Error::UnexpectedError),

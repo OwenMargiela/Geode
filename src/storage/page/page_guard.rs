@@ -95,7 +95,7 @@ impl<'a> Drop for FrameGuard<'a> {
 
         (self.on_drop)(self.frame_id, true);
 
-        println!("Dropping {}", self.frame_id);
+        // println!("Dropping {}", self.frame_id);
     }
 }
 

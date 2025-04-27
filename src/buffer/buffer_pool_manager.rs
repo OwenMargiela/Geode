@@ -39,15 +39,6 @@ pub struct FrameHeader {
 // Maps every page to possible allocated frame
 type FilePageMap = HashMap<PageId, Option<FrameId>>;
 
-pub struct FramesWrapper {
-    pub inner: Arc<RwLock<LinkedHashMap<FrameId, Option<RwLock<FrameHeader>>>>>,
-}
-
-impl Drop for FramesWrapper {
-    fn drop(&mut self) {
-        println!("🔽 FramesWrapper is being dropped. Remaining frames: {}", self.inner.read().unwrap().len());
-    }
-}
 
 pub struct BufferPoolManager {
     num_frames: usize,
@@ -142,8 +133,6 @@ impl BufferPoolManager {
 
         // Inittialize Default Page
         {
-            dbg!(file_id, page_id);
-
             let buffer: Box<[u8]> = Box::new([0; PAGE_SIZE]);
             let mut page_buffer = Manager::aligned_buffer(&buffer);
             manager_guard
@@ -373,7 +362,7 @@ impl BufferPoolManager {
         {
             let mut manager = self.manager.lock().unwrap();
 
-            println!("Reading File {} Page {}", file_id, page_id);
+            // println!("Reading File {} Page {}", file_id, page_id);
 
             let buffer: Box<[u8]> = Box::new([0; PAGE_SIZE]);
             let mut page_buffer = Manager::aligned_buffer(&buffer);
@@ -410,8 +399,8 @@ impl BufferPoolManager {
        
 
         // Update a Shared frame to a non None value
-        println!("Done");
-        println!("Frame number {}", frame_id);
+        // println!("Done");
+        // println!("Frame number {}", frame_id);
         let mut frame_guard = self.frames
             .try_write()
             .unwrap();
@@ -419,7 +408,7 @@ impl BufferPoolManager {
         frame_guard.insert(frame_id, Some(RwLock::new(frame)));
         drop(frame_guard);
 
-        println!("Dropped gaurd in frame");
+        // println!("Dropped gaurd in frame");
 
 
     }
@@ -444,13 +433,13 @@ impl BufferPoolManager {
 
     pub fn write_page(&self, file_id: u64, page_id: PageId) -> WriteGuard {
 
-        println!("Trying to obtain lock on {}", page_id);
+        // println!("Trying to obtain lock on {}", page_id);
 
         let guard = self
             .check_write_page(file_id, page_id)
             .expect("Write lock error");
 
-            println!(" obtained lock on {}", page_id);
+            // println!(" obtained lock on {}", page_id);
 
         guard
     }
