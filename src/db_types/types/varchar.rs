@@ -1,3 +1,6 @@
+#![allow(unused_variables)] // TODO(you): remove this lint after implementing this mod
+#![allow(dead_code)] // TODO(you): remove this lint after implementing this mod
+
 use crate::db_types::container::{data_type_string, Serializable};
 use std::io::{self, Cursor, Read};
 

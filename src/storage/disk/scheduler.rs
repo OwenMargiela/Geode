@@ -1,3 +1,6 @@
+#![allow(unused_variables)] // TODO(you): remove this lint after implementing this mod
+#![allow(dead_code)] // TODO(you): remove this lint after implementing this mod
+
 use std::{
     future::Future,
     sync::{
@@ -94,7 +97,7 @@ impl DiskScheduler {
         let (tx, rx) = mpsc::channel();
 
         let mut scheduler = Self {
-            manager: manager,
+            manager,
             shared_queue: (tx, Some(rx)),
         };
 

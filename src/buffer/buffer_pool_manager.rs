@@ -1,3 +1,6 @@
+#![allow(unused_variables)] // TODO(you): remove this lint after implementing this mod
+#![allow(dead_code)] // TODO(you): remove this lint after implementing this mod
+
 use std::{
     collections::{HashMap, VecDeque},
     sync::{
@@ -9,13 +12,16 @@ use std::{
 use hashlink::LinkedHashMap;
 
 use crate::{
+    index::btree::AccessType,
     storage::{
         disk::{
             manager::Manager,
             scheduler::{DiskData, DiskRequest, DiskScheduler},
         },
-        page::page::page_constants::PAGE_SIZE,
-        page::page_guard::{FrameGuard, PageGuard, ReadGuard, WriteGuard},
+        page::{
+            page::page_constants::PAGE_SIZE,
+            page_guard::{FrameGuard, PageGuard, ReadGuard, WriteGuard},
+        },
     },
     utils::replacer::{LRUKReplacer, Replacer},
 };
@@ -39,7 +45,6 @@ pub struct FrameHeader {
 // Maps every page to possible allocated frame
 type FilePageMap = HashMap<PageId, Option<FrameId>>;
 
-
 pub struct BufferPoolManager {
     num_frames: usize,
     next_page_id: AtomicU32,
@@ -60,10 +65,10 @@ pub struct BufferPoolManager {
 
     pub manager: Arc<Mutex<Manager>>,
 }
-pub enum AccessType {
-    Read,
-    Write,
-}
+// pub enum AccessType {
+//     Read,
+//     Write,
+// }
 
 impl BufferPoolManager {
     pub fn new(num_frames: usize, manager: Manager, k_dist: usize) -> Self {
@@ -387,30 +392,23 @@ impl BufferPoolManager {
         };
 
         {
-
             let mut file_page_map_gaurd = self.file_page_map.write().unwrap();
 
             let file_map = file_page_map_gaurd.get_mut(&file_id).unwrap();
-            
 
             // Maps the Page_ID to a Frame_Id
             file_map.insert(page_id, Some(frame_id));
         }
-       
 
         // Update a Shared frame to a non None value
         // println!("Done");
         // println!("Frame number {}", frame_id);
-        let mut frame_guard = self.frames
-            .try_write()
-            .unwrap();
+        let mut frame_guard = self.frames.try_write().unwrap();
 
         frame_guard.insert(frame_id, Some(RwLock::new(frame)));
         drop(frame_guard);
 
         // println!("Dropped gaurd in frame");
-
-
     }
 
     fn create_guard(&self, frame_id: FrameId, access_type: AccessType) -> PageGuard {
@@ -432,14 +430,13 @@ impl BufferPoolManager {
     }
 
     pub fn write_page(&self, file_id: u64, page_id: PageId) -> WriteGuard {
-
         // println!("Trying to obtain lock on {}", page_id);
 
         let guard = self
             .check_write_page(file_id, page_id)
             .expect("Write lock error");
 
-            // println!(" obtained lock on {}", page_id);
+        // println!(" obtained lock on {}", page_id);
 
         guard
     }

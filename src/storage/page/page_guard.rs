@@ -1,9 +1,13 @@
+#![allow(unused_variables)] // TODO(you): remove this lint after implementing this mod
+#![allow(dead_code)] // TODO(you): remove this lint after implementing this mod
+
 use std::sync::{atomic::Ordering, Arc, Mutex, RwLock, RwLockReadGuard, RwLockWriteGuard};
 
 use hashlink::LinkedHashMap;
 
 use crate::{
-    buffer::buffer_pool_manager::{AccessType, FrameHeader, FrameId},
+    buffer::buffer_pool_manager::{FrameHeader, FrameId},
+    index::btree::AccessType,
     utils::replacer::{LRUKReplacer, Replacer},
 };
 
@@ -28,8 +32,6 @@ impl<'a> PageGuard<'a> {
             None
         }
     }
-
-    
 }
 
 pub struct FrameGuard<'a> {
@@ -55,7 +57,6 @@ impl<'a> FrameGuard<'a> {
         let on_drop = Box::new(move |frame_id: u32, evictabilility: bool| {
             let mut replacer_guard = replacer.lock().unwrap();
 
-
             replacer_guard.record_access(frame_id);
             replacer_guard.set_evictable(frame_id, evictabilility);
 
@@ -80,8 +81,6 @@ impl<'a> FrameGuard<'a> {
 
 impl<'a> Drop for FrameGuard<'a> {
     fn drop(&mut self) {
-
-
         let frame_guard = self
             .guard
             .get(&self.frame_id)
@@ -149,6 +148,4 @@ impl<'a> ReadGuard<'a> {
         let frame = frame_guard.read().unwrap();
         frame
     }
-
-    
 }

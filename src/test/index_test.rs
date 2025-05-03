@@ -9,9 +9,9 @@ pub mod test {
     use crate::{
         buffer::buffer_pool_manager::BufferPoolManager,
         index::{
-            btree::{self, BTreeBuilder, Context, Set},
-            errors::Error,
-            node_type::{Key, KeyValuePair, PageId, RowID},
+            btree::BTreeBuilder,
+            
+            node_type::{Key, KeyValuePair, RowID},
         },
         storage::disk::manager::Manager,
     };
@@ -63,7 +63,7 @@ pub mod test {
             .b_parameter(2)
             .build("test".to_string(), bpm)
             .unwrap();
-        let celing = 40;
+        let celing = 50;
 
         for i in 0..celing {
             index

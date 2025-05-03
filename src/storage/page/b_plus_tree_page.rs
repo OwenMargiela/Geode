@@ -1,3 +1,6 @@
+#![allow(unused_variables)] // TODO(you): remove this lint after implementing this mod
+#![allow(dead_code)] // TODO(you): remove this lint after implementing this mod
+
 use crate::index::{
     errors::Error,
     node::Node,
@@ -164,7 +167,6 @@ impl TryFrom<&Node> for BTreePage {
                     }
                 }
 
-
                 data[POINTER_OFFSET..POINTER_OFFSET + POINTER_SIZE]
                     .copy_from_slice(&current_page.0.to_le_bytes());
             }
@@ -232,7 +234,7 @@ mod tests {
             node::Node,
             node_type::{Key, KeyValuePair, NextPointer, NodeType, PageId, RowID},
         },
-        storage::page::{b_plus_tree_page::BTreePage, btree_page_layout::POINTER_OFFSET},
+        storage::page::b_plus_tree_page::BTreePage,
     };
 
     #[test]
@@ -293,7 +295,6 @@ mod tests {
         // Serialize data
         let page = BTreePage::try_from(&node)?;
 
-        
         // Deserialize back the page
         let res = Node::try_from(page)?;
         assert_eq!(res.is_root, node.is_root);

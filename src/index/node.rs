@@ -1,3 +1,6 @@
+#![allow(unused_variables)] // TODO(you): remove this lint after implementing this mod
+#![allow(dead_code)] // TODO(you): remove this lint after implementing this mod
+
 use crate::storage::page::b_plus_tree_page::BTreePage;
 use crate::storage::page::btree_page_layout::{
     FromByte, INTERNAL_NODE_HEADER_SIZE, INTERNAL_NODE_NUM_CHILDREN_OFFSET, IS_ROOT_OFFSET,
@@ -6,9 +9,7 @@ use crate::storage::page::btree_page_layout::{
 };
 
 use super::errors::Error;
-use super::node_type::{
-    update_next_pointer, Key, KeyValuePair, NextPointer, NodeType, PageId, RowID,
-};
+use super::node_type::{Key, KeyValuePair, NextPointer, NodeType, PageId, RowID};
 
 /// NodeKeys are either guideposts in an internal node, or the actual kv pair in the leaf
 pub enum NodeKey {
@@ -24,8 +25,8 @@ pub struct Node {
 }
 
 pub enum Policy {
-    merge,
-    borrow,
+    Merge,
+    Borrow,
 }
 
 impl Node {

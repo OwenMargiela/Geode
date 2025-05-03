@@ -1,3 +1,6 @@
+#![allow(unused_variables)] // TODO(you): remove this lint after implementing this mod
+#![allow(dead_code)] // TODO(you): remove this lint after implementing this mod
+
 use std::{collections::HashMap, fs::File, os::unix::fs::MetadataExt};
 
 use super::replacer::{LRUKReplacer, Replacer};

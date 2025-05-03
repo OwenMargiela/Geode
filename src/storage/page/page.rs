@@ -1,6 +1,7 @@
-use std::{
-    ptr::copy
-};
+#![allow(unused_variables)] // TODO(you): remove this lint after implementing this mod
+#![allow(dead_code)] // TODO(you): remove this lint after implementing this mod
+
+use std::ptr::copy;
 
 use page_constants::{
     BYTE_LENGTH_2, FREESPACE_POINTER, FREESPACE_SIZE, METADATA_SIZE, METADATA_STARTING_OFFSET,
@@ -8,8 +9,6 @@ use page_constants::{
 };
 
 use crate::storage::tuple::Tuple;
-
-
 
 pub struct Page {
     pub data: [u8; PAGE_SIZE],
@@ -110,9 +109,7 @@ impl SlottedPage for Page {
             );
         }
 
-        Page {
-            data: page_data,
-        }
+        Page { data: page_data }
     }
 
     fn append(&mut self, tuple: Tuple) -> Option<usize> {

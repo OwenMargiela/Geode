@@ -1,3 +1,7 @@
+#![allow(unused_variables)] // TODO(you): remove this lint after implementing this mod
+#![allow(dead_code)] // TODO(you): remove this lint after implementing this mod
+
+
 use std::collections::HashMap;
 
 use header_const::{
@@ -45,8 +49,6 @@ pub fn schema_reorder(input_values: &mut Vec<SchemaDataValue>, schema: &Schema) 
         let val = map.remove(column_.column_name).expect("No such key exists");
         input_values.push(val);
     }
-
-    
 }
 
 pub fn extract_byte_box_data(mut input_values: Vec<SchemaDataValue>) -> Vec<ByteBox> {
@@ -106,7 +108,6 @@ impl Tuple {
     // Consider making every element in the u8 data have a length prefix
     // but not now cuase im tired with section of the code base in particular
     pub fn get(&self, idx: usize, length: usize) -> Option<&[u8]> {
-
         let header_len = self.data[HEADER_LENGTH_OFFSET] as usize;
         let num_varlen_ptrs = self.data[VARLEN_OFFSET];
         let data_ptrs = &self.data[DATA_PTR_OFFSET..header_len];
@@ -138,7 +139,7 @@ impl Tuple {
             Some(field)
         }
     }
-    
+
     fn serialize_body(
         values: &Vec<ByteBox>,
         data_ptrs: &mut Vec<u8>,
@@ -311,7 +312,6 @@ mod tests {
 
     #[test]
     fn test_tuple_variable_length_fields() {
-        
         let mut schema = SchemaBuilder::new()
             .add_big_int("id")
             .add_varchar("description1", 255)

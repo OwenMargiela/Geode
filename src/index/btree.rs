@@ -1,17 +1,18 @@
-use std::{cell::RefCell, collections::VecDeque, fmt, os::unix::process::parent_id, vec};
+#![allow(unused_variables)] // TODO(you): remove this lint after implementing this mod
+#![allow(dead_code)] // TODO(you): remove this lint after implementing this mod
+
+use std::{cell::RefCell, collections::VecDeque, vec};
 
 use crate::{
-    buffer::buffer_pool_manager::{AccessType, BufferPoolManager, FileId},
+    buffer::buffer_pool_manager::{BufferPoolManager, FileId},
     storage::page::{
-        b_plus_tree_page::BTreePage,
-        btree_page_layout::PAGE_SIZE,
-        page_guard::{PageGuard, ReadGuard, WriteGuard},
+        b_plus_tree_page::BTreePage, btree_page_layout::PAGE_SIZE, page_guard::PageGuard,
     },
 };
 
 use super::{
     errors::Error,
-    node::{Node, NodeKey, Policy},
+    node::Node,
     node_type::{Key, KeyValuePair, NextPointer, NodeType, PageId},
 };
 
@@ -21,6 +22,11 @@ pub struct ReadContextStack {
 
 pub struct WriteContextStack {
     child: PageId,
+}
+
+pub(crate) enum AccessType {
+    Read,
+    Write,
 }
 /// Crabbing Protocols
 
@@ -63,27 +69,6 @@ pub struct Context {
     set: Set,
 }
 
-impl fmt::Debug for Context {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "Context {{ root_page_id: {:?}, ", self.root_page_id)?;
-
-        match &self.set {
-            Set::WriteStack(stack) => {
-                write!(f, "set: WriteStack ({} items)", stack.len())?;
-                write!(f, " [")?;
-                for item in stack {
-                    write!(f, " {:?} ", item.child);
-                }
-                write!(f, "] ")?;
-            }
-            Set::ReadStack(stack) => {
-                write!(f, "set: ReadStack ({} items)", stack.len())?;
-            }
-        }
-
-        write!(f, " }}")
-    }
-}
 impl Context {
     pub fn new(root_page_id: PageId, protocol: Protocol) -> Self {
         match protocol {
@@ -180,7 +165,7 @@ impl Default for BTreeBuilder {
 
 impl BTree {
     // Returns the node, if we can borrow from it and whether or not its the left node
-    pub fn findRebalanceCandidate(
+    pub fn find_rebalance_candidate(
         &self,
         node: &Node,
         page_id: PageId,
@@ -569,7 +554,7 @@ impl BTree {
         let (mut parent_node, _) = self.get_node_obj(Protocol::Exclusive, parent_id)?;
 
         let (mut candidate, mut separator_key, mut is_left, mut can_borrow) =
-            self.findRebalanceCandidate(&parent_node, child_id)?;
+            self.find_rebalance_candidate(&parent_node, child_id)?;
 
         let mut current_node = child_node;
         let mut current_candidate = candidate;
@@ -661,7 +646,7 @@ impl BTree {
                 (parent_node, _) = self.get_node_obj(Protocol::Exclusive, parent_id)?;
 
                 (candidate, separator_key, is_left, can_borrow) =
-                    self.findRebalanceCandidate(&parent_node, current_node.pointer.unwrap())?;
+                    self.find_rebalance_candidate(&parent_node, current_node.pointer.unwrap())?;
 
                 current_candidate = candidate;
                 current_parent_node = parent_node;
@@ -706,7 +691,7 @@ impl BTree {
         leaf_node.remove_entry(search)?;
 
         // Simple Delete No Split
-        
+
         if leaf_node.get_key_array_length() >= self.d - 1 || leaf_node.is_root {
             println!("No split");
             match &mut context.set {
@@ -782,7 +767,7 @@ impl BTree {
     }
 
     pub fn search(&self, search: Key) -> Result<KeyValuePair, Error> {
-        let (mut node, context) = self.match_protocol(Protocol::Shared)?;
+        let (node, context) = self.match_protocol(Protocol::Shared)?;
 
         if let NodeType::Leaf(_, _, _) = node.node_type {
             let kv_pair = node.find_key_value(&search)?;

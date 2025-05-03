@@ -1,21 +1,12 @@
-// use container::DataBox;
-
-// use  crate::db_types::container::data_type_string;
+#![allow(unused_variables)] // TODO(you): remove this lint after implementing this mod
+#![allow(dead_code)] // TODO(you): remove this lint after implementing this mod
 
 use std::cell::RefCell;
 
 use crate::db_types::container::{data_type_string, ByteBox};
 
-// use db_types::container::{data_type_string, ByteBox};
-
-
-
-
 #[derive(Clone, Copy)]
 
-// Convert fields to owned values
-// TODO
-// Getters and Setter
 pub struct Column<'a> {
     pub column_name: &'a str,
     pub column_type: &'a str,
@@ -253,7 +244,7 @@ impl<'a> Schema<'a> {
     pub fn icrement_version(&mut self) {
         self.version += 1;
     }
-   
+
     pub fn validate_fields(&self, values: &Vec<ByteBox>) -> bool {
         let schema_len = self.length;
 
@@ -295,7 +286,6 @@ impl<'a> Schema<'a> {
         &self.columns
     }
 }
-
 
 // TODO;
 // Implement nullable fields
