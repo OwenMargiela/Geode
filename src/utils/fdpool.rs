@@ -97,12 +97,4 @@ pub mod tests {
             remove_file(string).expect("Failed to delete the test file");
         }
     }
-
-    #[test]
-    fn clean() {
-        for i in 1..4 {
-            let string = format!("path_{i}.txt");
-            remove_file(string).expect("Failed to delete the test file");
-        }
-    }
 }

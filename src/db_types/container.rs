@@ -29,9 +29,6 @@ pub struct SchemaDataValue<'a> {
     pub data: ByteBox<'a>,
 }
 
-// TODO
-// Setters and Getter
-
 #[derive(Clone)]
 pub struct ByteBox<'a> {
     pub data: Vec<u8>,

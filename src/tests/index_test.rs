@@ -10,7 +10,6 @@ pub mod test {
         buffer::buffer_pool_manager::BufferPoolManager,
         index::{
             btree::BTreeBuilder,
-            
             node_type::{Key, KeyValuePair, RowID},
         },
         storage::disk::manager::Manager,
@@ -74,7 +73,7 @@ pub mod test {
                 .unwrap();
         }
 
-        for i in 1..celing + 1  {
+        for i in 1..celing + 1 {
             println!("\n\n\n Deleting {}", i);
             index.delete(&Key::new(i)).unwrap();
             let key_nine = index.find_node(&Key::new(i));

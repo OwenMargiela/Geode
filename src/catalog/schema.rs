@@ -18,7 +18,7 @@ pub struct Column<'a> {
 }
 
 impl<'a> Column<'a> {
-    fn new(name: &'a str, col_type: &'a str, offset_position: u8) -> Self {
+    pub(crate) fn new(name: &'a str, col_type: &'a str, offset_position: u8) -> Self {
         let fixed_length_bool: bool;
 
         match col_type {
@@ -45,34 +45,34 @@ impl<'a> Column<'a> {
             size: u8::MIN,
         }
     }
-    pub fn get_column_name(&self) -> &str {
+    pub(crate) fn get_column_name(&self) -> &str {
         &self.column_name
     }
-    pub fn get_column_type(&self) -> &str {
+    pub(crate) fn get_column_type(&self) -> &str {
         &self.column_type
     }
 
-    pub fn get_is_fixed_length(&self) -> &bool {
+    pub(crate) fn get_is_fixed_length(&self) -> &bool {
         &self.is_fixed_length
     }
 
-    pub fn get_is_numeric_type(&self) -> &bool {
+    pub(crate) fn get_is_numeric_type(&self) -> &bool {
         &self.is_numeric_type
     }
 
-    pub fn get_offset_position_in_tuple(&self) -> &u8 {
+    pub(crate) fn get_offset_position_in_tuple(&self) -> &u8 {
         &self.offset_position_in_tuple
     }
 
-    pub fn set_offset_potion_in_tuple(&mut self, new_position: u8) {
+    pub(crate) fn set_offset_potion_in_tuple(&mut self, new_position: u8) {
         self.offset_position_in_tuple = new_position;
     }
 
-    pub fn get_size(&self) -> &u8 {
+    pub(crate) fn get_size(&self) -> &u8 {
         &self.size
     }
 
-    pub fn set_size(&mut self, new_size: u8) {
+    pub(crate) fn set_size(&mut self, new_size: u8) {
         self.size = new_size;
     }
 }
@@ -81,13 +81,13 @@ pub struct SchemaBuilder<'a> {
     columns: Vec<Column<'a>>,
 }
 impl<'a> SchemaBuilder<'a> {
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self {
             columns: Vec::new(),
         }
     }
 
-    pub fn add_big_int(mut self, column_name: &'a str) -> Self {
+    pub(crate) fn add_big_int(mut self, column_name: &'a str) -> Self {
         let schema_length = self.columns.len();
 
         self.columns.push(Column::new(
@@ -98,7 +98,7 @@ impl<'a> SchemaBuilder<'a> {
         self
     }
 
-    pub fn add_int(mut self, column_name: &'a str) -> Self {
+    pub(crate) fn add_int(mut self, column_name: &'a str) -> Self {
         let schema_length = self.columns.len();
 
         self.columns.push(Column::new(
@@ -109,7 +109,7 @@ impl<'a> SchemaBuilder<'a> {
         self
     }
 
-    pub fn add_small_int(mut self, column_name: &'a str) -> Self {
+    pub(crate) fn add_small_int(mut self, column_name: &'a str) -> Self {
         let schema_length = self.columns.len();
 
         self.columns.push(Column::new(
@@ -120,7 +120,7 @@ impl<'a> SchemaBuilder<'a> {
         self
     }
 
-    pub fn add_decimal(mut self, column_name: &'a str) -> Self {
+    pub(crate) fn add_decimal(mut self, column_name: &'a str) -> Self {
         let schema_length = self.columns.len();
 
         self.columns.push(Column::new(
@@ -131,7 +131,7 @@ impl<'a> SchemaBuilder<'a> {
         self
     }
 
-    pub fn add_boolean(mut self, column_name: &'a str) -> Self {
+    pub(crate) fn add_boolean(mut self, column_name: &'a str) -> Self {
         let schema_length = self.columns.len();
 
         self.columns.push(Column::new(
@@ -142,7 +142,7 @@ impl<'a> SchemaBuilder<'a> {
         self
     }
 
-    pub fn add_char(mut self, column_name: &'a str, size: u8) -> Self {
+    pub(crate) fn add_char(mut self, column_name: &'a str, size: u8) -> Self {
         let schema_length = self.columns.len();
 
         self.columns.push(Column::new(
@@ -158,7 +158,7 @@ impl<'a> SchemaBuilder<'a> {
         self
     }
 
-    pub fn add_varchar(mut self, column_name: &'a str, size: u8) -> Self {
+    pub(crate) fn add_varchar(mut self, column_name: &'a str, size: u8) -> Self {
         let schema_length = self.columns.len();
 
         self.columns.push(Column::new(
@@ -176,12 +176,12 @@ impl<'a> SchemaBuilder<'a> {
 
     // Makes the previously added column nullable
 
-    pub fn set_null(self) -> Self {
+    pub(crate) fn set_null(self) -> Self {
         let res = self.set_null_result().unwrap();
         res
     }
 
-    fn set_null_result(mut self) -> Result<Self, String> {
+    pub(self) fn set_null_result(mut self) -> Result<Self, String> {
         let columns = &mut self.columns;
         let len = columns.len();
         if len < 1 {
@@ -193,7 +193,7 @@ impl<'a> SchemaBuilder<'a> {
         Ok(self)
     }
 
-    pub fn build(mut self) -> Schema<'a> {
+    pub(crate) fn build(mut self) -> Schema<'a> {
         let size = self.columns.len();
 
         // Varchar push down
@@ -228,7 +228,7 @@ pub struct Schema<'a> {
 }
 
 impl<'a> Schema<'a> {
-    pub fn get_col_idx(&self, col_name: &str) -> Option<u8> {
+    pub(crate) fn get_col_idx(&self, col_name: &str) -> Option<u8> {
         let idx: u8;
         for col_idx in 0..self.columns.len() {
             let col = self.columns.get(col_idx).unwrap();
@@ -241,11 +241,11 @@ impl<'a> Schema<'a> {
         None
     }
 
-    pub fn icrement_version(&mut self) {
+    pub(crate) fn icrement_version(&mut self) {
         self.version += 1;
     }
 
-    pub fn validate_fields(&self, values: &Vec<ByteBox>) -> bool {
+    pub(crate) fn validate_fields(&self, values: &Vec<ByteBox>) -> bool {
         let schema_len = self.length;
 
         if schema_len != values.len() {
@@ -264,162 +264,25 @@ impl<'a> Schema<'a> {
         true
     }
 
-    pub fn get_variable_length_offset(&self, values: &Vec<ByteBox>) -> Vec<u8> {
-        let mut varlen_offsets: Vec<u8> = Vec::new();
-        let mut current_offset = 0;
+    // pub(crate) fn get_variable_length_offset(&self, values: &Vec<ByteBox>) -> Vec<u8> {
+    //     let mut varlen_offsets: Vec<u8> = Vec::new();
+    //     let mut current_offset = 0;
 
-        for (i, column) in self.columns.iter().enumerate() {
-            if column.column_type == data_type_string::VARCHAR {
-                varlen_offsets.push(current_offset as u8);
+    //     for (i, column) in self.columns.iter().enumerate() {
+    //         if column.column_type == data_type_string::VARCHAR {
+    //             varlen_offsets.push(current_offset as u8);
 
-                current_offset += values[i].data_length + 1;
-            // account for length field
-            } else {
-                current_offset += values[i].data_length; // only the data length, no length field prefix
-            }
-        }
+    //             current_offset += values[i].data_length + 1;
+    //         // account for length field
+    //         } else {
+    //             current_offset += values[i].data_length; // only the data length, no length field prefix
+    //         }
+    //     }
 
-        varlen_offsets
-    }
+    //     varlen_offsets
+    // }
 
     pub fn get_columns(&self) -> &Vec<Column> {
         &self.columns
-    }
-}
-
-// TODO;
-// Implement nullable fields
-// Copy constructure for schema
-// schema might need to be expanded to include indexes and constraints ( we'll cross that bridge when we get there)
-// Implement reordering and padding for word alignment Varchars still remaain at the back
-
-#[cfg(test)]
-mod tests {
-
-    use crate::{
-        catalog::schema::Column,
-        db_types::container::{data_type_string, ByteBox},
-    };
-
-    use super::SchemaBuilder;
-
-    #[test]
-    fn schema_test() {
-        let schema = SchemaBuilder::new()
-            .add_varchar("Address", 50)
-            .add_big_int("Salary")
-            .add_char("Name", 15)
-            .add_varchar("moms_address", 50)
-            .build();
-
-        for i in 0..schema.length {
-            let col = &schema.columns.get(i).unwrap();
-            let col_name = col.column_name;
-            let col_type = col.column_type;
-
-            if col.column_type == data_type_string::CHAR
-                || col.column_type == data_type_string::VARCHAR
-            {
-                print!("{} {} {} \n", col_name, col_type, col.get_size())
-            } else {
-                print!("{} {} \n", col_name, col_type)
-            }
-        }
-    }
-    #[test]
-    fn schema_idx() {
-        let schema = SchemaBuilder::new()
-            .add_big_int("Salary")
-            .add_varchar("Address", 50)
-            .add_char("Name", 15)
-            .add_varchar("moms_address", 50)
-            .set_null()
-            .build();
-
-        let idx = schema.get_col_idx("moms_address").unwrap();
-
-        let msg = "idx out of bounds";
-        assert_eq!(
-            schema.columns.get(idx as usize).expect(msg).column_name,
-            "moms_address"
-        );
-
-        assert_eq!(
-            *schema.columns.get(idx as usize).expect(msg).get_size(),
-            50 as u8
-        );
-    }
-
-    #[test]
-    fn test_create_schema() {
-        // Varchar push down reorders the varchars to the back
-        let schema = SchemaBuilder::new()
-            .add_int("id")
-            .add_varchar("description1", 255)
-            .add_small_int("rating")
-            .add_varchar("description2", 255)
-            .add_decimal("price")
-            .add_varchar("description3", 255)
-            .add_boolean("available")
-            .set_null()
-            .build();
-
-        assert_eq!(schema.length, 7);
-        assert_eq!(schema.columns[0].column_name, "id");
-        assert_eq!(schema.columns[1].column_name, "rating");
-        assert_eq!(schema.columns[2].column_name, "price");
-        assert_eq!(schema.columns[3].column_name, "available");
-        assert_eq!(schema.columns[4].column_name, "description1");
-        assert_eq!(schema.columns[5].column_name, "description2");
-        assert_eq!(schema.columns[6].column_name, "description3");
-    }
-
-    #[test]
-    fn test_column_properties() {
-        let column = Column::new("id", data_type_string::INT, 0);
-
-        assert_eq!(column.column_name, "id");
-        assert_eq!(column.column_type, data_type_string::INT);
-        assert_eq!(column.is_fixed_length, true);
-        assert_eq!(column.is_numeric_type, true);
-        assert_eq!(column.offset_position_in_tuple, 0);
-    }
-
-    #[test]
-    fn test_bytebox_int() {
-        let bytebox = ByteBox::int(123);
-
-        assert_eq!(bytebox.datatype, data_type_string::INT);
-        assert_eq!(bytebox.data_length, 4);
-        assert_eq!(bytebox.data.len(), 4);
-        assert_eq!(&bytebox.data, &[123, 0, 0, 0]);
-    }
-
-    #[test]
-    fn test_schema_validation() {
-        let schema = SchemaBuilder::new()
-            .add_int("id")
-            .add_big_int("big_number")
-            .add_varchar("description", 255) // Varchar push down reorders this to the back
-            .add_char("initial", 1)
-            .build();
-
-        let mut values = vec![
-            ByteBox::int(1),
-            ByteBox::big_int(1234567890),
-            ByteBox::char("A", 1),
-            ByteBox::varchar("Test description", 255),
-        ];
-
-        assert!(schema.validate_fields(&values));
-
-        values = vec![
-            ByteBox::int(1),
-            ByteBox::big_int(1234567890),
-            ByteBox::varchar("Test description", 255), // Not in schema order
-            ByteBox::char("A", 1),
-        ];
-
-        assert!(!schema.validate_fields(&values));
     }
 }

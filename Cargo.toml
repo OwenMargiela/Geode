@@ -9,3 +9,7 @@ byteorder = "1.5.0"
 io-uring = "0.6"
 hashlink = "0.10.0"
 tokio = { version = "1", features = ["full"] }
+dashmap = "=6.1.0"
+crossbeam-queue = "0.3.12"
+
+

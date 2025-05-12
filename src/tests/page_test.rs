@@ -3,7 +3,7 @@
 pub mod test {
     use std::{
         fs::{remove_dir_all, remove_file},
-        path::PathBuf
+        path::PathBuf,
     };
 
     use crate::{
@@ -21,7 +21,7 @@ pub mod test {
 
         let manager = Manager::new(log_io, log_file_path);
 
-        let  mut bpm = BufferPoolManager::new(NUM_FRAMES, manager, K_DIST);
+        let mut bpm = BufferPoolManager::new(NUM_FRAMES, manager, K_DIST);
 
         let file_id = bpm.allocate_file();
 
@@ -114,12 +114,8 @@ pub mod test {
 
         {
             let immutable_guard = bpm.read_page(file_id, mutable_page_id);
-            println!("{:?}", immutable_guard.get_frame().data);
-            
-            assert_eq!(
-                &immutable_guard.get_frame().data,
-                &[1; PAGE_SIZE]
-            );
+
+            assert_eq!(&immutable_guard.get_frame().data, &[1; PAGE_SIZE]);
         }
     }
 

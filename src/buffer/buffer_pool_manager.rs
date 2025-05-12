@@ -2,13 +2,15 @@
 #![allow(dead_code)] // TODO(you): remove this lint after implementing this mod
 
 use std::{
-    collections::{HashMap, VecDeque},
+    collections::HashMap,
     sync::{
         atomic::{AtomicBool, AtomicU32, Ordering},
         Arc, Mutex, RwLock,
     },
 };
 
+use crossbeam_queue::SegQueue;
+use dashmap::DashMap;
 use hashlink::LinkedHashMap;
 
 use crate::{
@@ -45,17 +47,20 @@ pub struct FrameHeader {
 // Maps every page to possible allocated frame
 type FilePageMap = HashMap<PageId, Option<FrameId>>;
 
+type RwLinkMap<K, V> = RwLock<LinkedHashMap<K, V>>;
+
 pub struct BufferPoolManager {
     num_frames: usize,
     next_page_id: AtomicU32,
 
     // The frame headers of the frames that this buffer pool manages
-    frames: Arc<RwLock<LinkedHashMap<FrameId, Option<RwLock<FrameHeader>>>>>,
+    frames: Arc<RwLinkMap<FrameId, Option<RwLock<FrameHeader>>>>,
 
+    // Replace with flurry
     // File ID to file page map
-    file_page_map: Arc<RwLock<HashMap<FileId, FilePageMap>>>,
+    file_page_map: Arc<DashMap<FileId, FilePageMap>>,
 
-    free_frames: Arc<Mutex<VecDeque<FrameId>>>,
+    free_frames: Arc<SegQueue<FrameId>>,
 
     // The replacer to find unpinned / candidate Frames for eviction.
     replacer: Arc<Mutex<LRUKReplacer<FrameId>>>,
@@ -65,10 +70,6 @@ pub struct BufferPoolManager {
 
     pub manager: Arc<Mutex<Manager>>,
 }
-// pub enum AccessType {
-//     Read,
-//     Write,
-// }
 
 impl BufferPoolManager {
     pub fn new(num_frames: usize, manager: Manager, k_dist: usize) -> Self {
@@ -77,24 +78,24 @@ impl BufferPoolManager {
         let mut frames: LinkedHashMap<FrameId, Option<RwLock<FrameHeader>>> =
             LinkedHashMap::with_capacity(num_frames);
 
-        let mut free_frames: VecDeque<FrameId> = VecDeque::with_capacity(num_frames);
+        let free_frames: SegQueue<FrameId> = SegQueue::new();
 
-        let file_page_map: HashMap<FileId, FilePageMap> = HashMap::new();
+        let file_page_map: DashMap<FileId, FilePageMap> = DashMap::new();
 
         for i in 0..num_frames {
             frames.insert(i as u32, None);
 
             // The maximum amount of frames are all allocated at once
 
-            free_frames.push_back(i as u32);
+            free_frames.push(i as u32);
         }
 
         Self {
             num_frames,
             next_page_id: AtomicU32::new(0),
             frames: Arc::new(RwLock::new(frames)),
-            file_page_map: Arc::new(RwLock::new(file_page_map)),
-            free_frames: Arc::new(Mutex::new(free_frames)),
+            file_page_map: Arc::new(file_page_map),
+            free_frames: Arc::new(free_frames),
             replacer: Arc::new(Mutex::new(LRUKReplacer::new(num_frames as usize, k_dist))),
             disk_scheduler: Arc::new(Mutex::new(DiskScheduler::new(Arc::clone(&manager)))),
             manager: Arc::clone(&manager),
@@ -112,18 +113,13 @@ impl BufferPoolManager {
         drop(manager_guard);
 
         {
-            let mut file_map_guard = self.file_page_map.write().unwrap();
-
-            file_map_guard.insert(file_id, HashMap::new());
+            self.file_page_map.insert(file_id, HashMap::new());
         }
 
         file_id
     }
 
     pub fn new_page(&self, file_id: FileId) -> PageId {
-        // Lock Contention
-        // Not the most viable algorithm
-
         let manager = &self.manager;
         let mut manager_guard = manager.lock().unwrap();
 
@@ -131,10 +127,10 @@ impl BufferPoolManager {
 
         self.next_page_id.fetch_add(1, Ordering::Relaxed);
 
-        let mut file_page_map_guard = self.file_page_map.write().unwrap();
+        // let mut file_page_map_guard = self.file_page_map.write().unwrap();
 
         // Inititial frame_id for page
-        let page_frame_map = file_page_map_guard.get_mut(&file_id).unwrap();
+        let mut page_frame_map = self.file_page_map.get_mut(&file_id).unwrap();
 
         // Inittialize Default Page
         {
@@ -155,8 +151,9 @@ impl BufferPoolManager {
 
     // Study this
     pub fn delete_page(&self, file_id: FileId, page_id: PageId) -> bool {
-        let mut page_frame_map_guard = self.file_page_map.write().unwrap();
-        let page_frame_map = match page_frame_map_guard.get_mut(&file_id) {
+        let page_frame_map = self.file_page_map.clone();
+
+        let mut page_frame_map = match page_frame_map.get_mut(&file_id) {
             Some(map) => map,
             None => return false,
         };
@@ -185,10 +182,7 @@ impl BufferPoolManager {
             .is_ok()
         {
             page_frame_map.insert(page_id, None);
-            self.free_frames
-                .lock()
-                .unwrap()
-                .push_front(frame.read().unwrap().frame_id);
+            self.free_frames.push(frame.read().unwrap().frame_id);
             return true;
         }
 
@@ -196,7 +190,7 @@ impl BufferPoolManager {
         false
     }
 
-    fn check_page(
+    pub(self) fn check_page(
         &self,
         file_id: FileId,
         page_id: PageId,
@@ -205,8 +199,8 @@ impl BufferPoolManager {
         let frame_id: Option<u32>;
 
         {
-            let file_map_guard = self.file_page_map.read().unwrap();
-            let file_map = file_map_guard.get(&file_id)?; // Error if file has not been allocated
+            // let file_map_guard = self.file_page_map.read().unwrap();
+            let file_map = self.file_page_map.get(&file_id)?; // Error if file has not been allocated
             frame_id = *file_map.get(&page_id).unwrap();
         }
 
@@ -216,7 +210,7 @@ impl BufferPoolManager {
             // 1.
             // Free frames are available no eviction needed
 
-            if let Some(frame_id) = self.free_frames.lock().unwrap().pop_front() {
+            if let Some(frame_id) = self.free_frames.pop() {
                 self.init_frame_data(file_id, page_id, frame_id);
                 return Some(self.create_guard(frame_id, access_type));
             }
@@ -252,8 +246,7 @@ impl BufferPoolManager {
             let page_data = &evicted_page_guard.data;
 
             {
-                let mut file_map_guard = self.file_page_map.write().unwrap();
-                let file_map = file_map_guard.get_mut(&evicted_page_guard.file_id)?;
+                let mut file_map = self.file_page_map.get_mut(&evicted_page_guard.file_id)?;
                 file_map.insert(evicted_page_guard.page_id, None);
             }
 
@@ -287,7 +280,7 @@ impl BufferPoolManager {
         None
     }
 
-    pub fn flush_page_sync(
+    pub(self) fn flush_page_sync(
         &self,
         file_id: u64,
         page_id: PageId,
@@ -295,13 +288,9 @@ impl BufferPoolManager {
     ) -> bool {
         // Does file and page exist ?
 
-        let exists = self
-            .file_page_map
-            .try_read()
-            .unwrap()
-            .get(&file_id) // Error if file has not beeen allocated
-            .and_then(|file_map| file_map.get(&page_id)) // Error if page as not allocated
-            .is_some();
+        let file_map = self.file_page_map.get(&file_id).unwrap(); // Error if file has not beeen allocated
+
+        let exists = file_map.get(&page_id).is_some();
 
         if !exists {
             return false;
@@ -322,16 +311,17 @@ impl BufferPoolManager {
 
         false
     }
-    pub async fn flush_page_async(&self, file_id: FileId, page_id: PageId, frame: &[u8]) -> bool {
+    pub(self) async fn flush_page_async(
+        &self,
+        file_id: FileId,
+        page_id: PageId,
+        frame: &[u8],
+    ) -> bool {
         // Does file and page exist ?
 
-        let exists = self
-            .file_page_map
-            .try_read()
-            .unwrap()
-            .get(&file_id) // Error if file has not beeen allocated
-            .and_then(|file_map| file_map.get(&page_id)) // Error if page as not allocated
-            .is_some();
+        let file_map = self.file_page_map.get(&file_id).unwrap(); // Error if file has not beeen allocated
+
+        let exists = file_map.get(&page_id).is_some();
 
         if !exists {
             return false;
@@ -359,15 +349,13 @@ impl BufferPoolManager {
         true
     }
 
-    fn init_frame_data(&self, file_id: FileId, page_id: PageId, frame_id: FrameId) {
+    pub(self) fn init_frame_data(&self, file_id: FileId, page_id: PageId, frame_id: FrameId) {
         // Read page data into memory
 
         let mut frame_data = [0u8; PAGE_SIZE];
 
         {
             let mut manager = self.manager.lock().unwrap();
-
-            // println!("Reading File {} Page {}", file_id, page_id);
 
             let buffer: Box<[u8]> = Box::new([0; PAGE_SIZE]);
             let mut page_buffer = Manager::aligned_buffer(&buffer);
@@ -392,17 +380,12 @@ impl BufferPoolManager {
         };
 
         {
-            let mut file_page_map_gaurd = self.file_page_map.write().unwrap();
-
-            let file_map = file_page_map_gaurd.get_mut(&file_id).unwrap();
+            let mut file_map = self.file_page_map.get_mut(&file_id).unwrap();
 
             // Maps the Page_ID to a Frame_Id
             file_map.insert(page_id, Some(frame_id));
         }
 
-        // Update a Shared frame to a non None value
-        // println!("Done");
-        // println!("Frame number {}", frame_id);
         let mut frame_guard = self.frames.try_write().unwrap();
 
         frame_guard.insert(frame_id, Some(RwLock::new(frame)));
@@ -411,25 +394,25 @@ impl BufferPoolManager {
         // println!("Dropped gaurd in frame");
     }
 
-    fn create_guard(&self, frame_id: FrameId, access_type: AccessType) -> PageGuard {
+    pub(self) fn create_guard(&self, frame_id: FrameId, access_type: AccessType) -> PageGuard {
         // Acquire the read lock for the frames map
         let frame_guard = self.frames.read().unwrap();
         FrameGuard::new(frame_id, self.replacer.clone(), frame_guard, access_type)
     }
 
-    fn check_write_page(&self, file_id: u64, page_id: PageId) -> Option<WriteGuard> {
+    pub(self) fn check_write_page(&self, file_id: u64, page_id: PageId) -> Option<WriteGuard> {
         self.check_page(file_id, page_id, AccessType::Write)
             .map(|guard| guard.into_write_guard())
             .expect("Guard Error")
     }
 
-    fn check_read_page(&self, file_id: u64, page_id: PageId) -> Option<ReadGuard> {
+    pub(self) fn check_read_page(&self, file_id: u64, page_id: PageId) -> Option<ReadGuard> {
         self.check_page(file_id, page_id, AccessType::Read)
             .map(|guard| guard.into_read_guard())
             .expect("Guard Error")
     }
 
-    pub fn write_page(&self, file_id: u64, page_id: PageId) -> WriteGuard {
+    pub(crate) fn write_page(&self, file_id: u64, page_id: PageId) -> WriteGuard {
         // println!("Trying to obtain lock on {}", page_id);
 
         let guard = self
@@ -441,7 +424,7 @@ impl BufferPoolManager {
         guard
     }
 
-    pub fn read_page(&self, file_id: u64, page_id: PageId) -> ReadGuard {
+    pub(crate) fn read_page(&self, file_id: u64, page_id: PageId) -> ReadGuard {
         let guard = self
             .check_read_page(file_id, page_id)
             .expect("Read lock error");
@@ -449,15 +432,12 @@ impl BufferPoolManager {
         guard
     }
 
-    pub fn get_pin_count(&self, file_id: FileId, page_id: PageId) -> u32 {
-        let page_frame_map_guard = self.file_page_map.read().unwrap();
-        let page_frame_map = page_frame_map_guard.get(&file_id).unwrap();
+    pub(crate) fn get_pin_count(&self, file_id: FileId, page_id: PageId) -> u32 {
+        let page_frame_map = self.file_page_map.get(&file_id).unwrap();
         let frame = page_frame_map.get(&page_id).unwrap();
 
         let frame_option_guard = self.frames.read().unwrap();
         let frame_option = frame_option_guard.get(&frame.unwrap()).unwrap();
-
-        drop(page_frame_map_guard);
 
         let frame_guard = frame_option.as_ref().expect("Frame").read().unwrap();
 

@@ -3,7 +3,7 @@ mod catalog;
 mod db_types;
 mod storage;
 mod utils;
-mod test;
+mod tests;
 mod index;
 
 fn main() {}

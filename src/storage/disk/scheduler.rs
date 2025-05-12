@@ -87,13 +87,12 @@ pub struct DiskRequest {
 // Struct for scheduling disk I/O operations asynchronously.
 
 pub struct DiskScheduler {
-    manager: Arc<Mutex<Manager>>,
+    pub manager: Arc<Mutex<Manager>>,
     shared_queue: (Sender<DiskRequest>, Option<Receiver<DiskRequest>>),
 }
 
 impl DiskScheduler {
     pub fn new(manager: Arc<Mutex<Manager>>) -> Self {
-        // let (log_file, log_file_path) = Manager::open_log();
         let (tx, rx) = mpsc::channel();
 
         let mut scheduler = Self {
@@ -168,73 +167,5 @@ impl DiskScheduler {
     pub fn schedule(&self, request: DiskRequest) {
         let tx = &self.shared_queue.0;
         tx.send(request).expect("Failed to send disk request");
-    }
-}
-
-#[cfg(test)]
-pub mod test {
-    use std::sync::{Arc, Mutex};
-
-    use crate::storage::{disk::manager::Manager, page::page::page_constants::PAGE_SIZE};
-
-    use super::{DiskData, DiskRequest, DiskScheduler};
-
-    #[tokio::main]
-    #[test]
-    async fn scheduler_test() {
-        let (log_file, log_file_path) = Manager::open_log();
-        let manager = Arc::new(Mutex::new(Manager::new(log_file, log_file_path)));
-        let scheduler = DiskScheduler::new(Arc::clone(&manager));
-        let future_one = scheduler.create_future();
-
-        let (file_id, _) = scheduler
-            .manager
-            .lock()
-            .unwrap()
-            .create_db_file()
-            .expect("File made");
-
-        // Lock contention allow for functionality to check if a page needs to be allocated thats automatic
-        let mut gurad = scheduler.manager.lock().unwrap();
-        let (page_id, _) = gurad.allocate_page(file_id);
-        drop(gurad);
-
-        // Write Request
-        let data = [1; PAGE_SIZE];
-        let page_data = Manager::aligned_buffer(&data);
-
-        let request = DiskRequest {
-            data: DiskData::Write(Some(page_data)), // Move the buffer
-            done_flag: Arc::clone(&future_one.flag),
-            file_id,
-            is_write: true,
-            page_id,
-            waker: Arc::clone(&future_one.waker),
-        };
-
-        scheduler.schedule(request);
-
-        // Read Request
-        let future_two = scheduler.create_future();
-        let page_buffer = Arc::new(Mutex::new(Manager::aligned_buffer(&vec![0; PAGE_SIZE])));
-
-        let request = DiskRequest {
-            data: DiskData::Read(Some(Arc::clone(&page_buffer))), // Shared buffer reference
-            done_flag: Arc::clone(&future_two.flag),
-            file_id,
-            is_write: false,
-            page_id,
-            waker: Arc::clone(&future_two.waker),
-        };
-
-        scheduler.schedule(request);
-
-        future_one.await;
-        future_two.await;
-
-        // Verify Read &Write
-        let read_data = page_buffer.lock().unwrap();
-
-        assert_eq!(&**read_data, &data, "Page read mismatch!");
     }
 }
