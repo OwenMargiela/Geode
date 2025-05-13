@@ -1,7 +1,7 @@
 ## The Buffer Pool Manager
 
 The buffer pool is responsible for moving database pages to and from memory and persistent storage.
-It essentially caches the most frequently accessed pages for speedy retrievals, evicting unused or 
+It caches the most frequently accessed pages for speedy retrievals, evicting unused or 
 cold pages whenever needed. More on eviction strategies in the LRU's readme file. Every database page
 consists of no more than 4096 bytes or 4KB of data. These fixed-size buffers are loaded into a logical
 unit known as a frame.
@@ -15,4 +15,4 @@ page management. The DBMS almost always wants to control things itself and can d
 2. Better buffer replacement policies.
 3. Specialized fetching algorithms to optimize query execution.
 
-This is a thread-safe implementation a buffer poool. Perfect for sharing between several processes at once
+This is a thread-safe implementation of a buffer pool. Perfect for sharing between several processes at once
