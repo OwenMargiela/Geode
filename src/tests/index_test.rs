@@ -3,7 +3,7 @@
 pub mod test {
     use std::{
         fs::{remove_dir_all, remove_file},
-        path::PathBuf,
+        path::PathBuf, sync::Arc,
     };
 
     use crate::{
@@ -24,10 +24,11 @@ pub mod test {
         let manager = Manager::new(log_io, log_file_path);
 
         let bpm = BufferPoolManager::new(NUM_FRAMES, manager, K_DIST);
+        
 
         let index = BTreeBuilder::new()
             .b_parameter(2)
-            .build("test".to_string(), bpm)
+            .build("test".to_string(), Arc::new(bpm))
             .unwrap();
         let celing = 30;
 
@@ -60,7 +61,7 @@ pub mod test {
 
         let index = BTreeBuilder::new()
             .b_parameter(2)
-            .build("test".to_string(), bpm)
+            .build("test".to_string(), Arc::new(bpm))
             .unwrap();
         let celing = 50;
 
@@ -73,14 +74,13 @@ pub mod test {
                 .unwrap();
         }
 
+        index.print();
+
         for i in 1..celing + 1 {
-            println!("\n\n\n Deleting {}", i);
             index.delete(&Key::new(i)).unwrap();
             let key_nine = index.find_node(&Key::new(i));
             assert_eq!(key_nine.is_err(), true);
         }
-
-        index.print();
     }
 
     #[test]

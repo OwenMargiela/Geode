@@ -3,8 +3,6 @@
 
 use std::cmp::{Eq, Ord, Ordering, PartialOrd};
 
-use super::errors::Error;
-
 #[derive(Clone, Copy, Eq, Debug, PartialEq, PartialOrd, Ord)]
 pub struct PageId(pub u64);
 
@@ -128,26 +126,6 @@ pub enum NodeType {
 
     Unexpected,
 }
-
-pub fn update_next_pointer(node: &mut NodeType, next_page_pointer: [u8; 8]) -> Result<(), Error> {
-    match node {
-        NodeType::Leaf(_, next_pointer, _) => {
-            *next_pointer = NextPointer(Some(next_page_pointer));
-            Ok(())
-        }
-        _ => Err(Error::UnexpectedError),
-    }
-}
-
-// pub fn update_pointer(node: &mut NodeType, page_pointer: [u8; 8]) -> Result<(), Error> {
-//     match node {
-//         NodeType::Leaf(_, next_pointer,_) => {
-//             *next_pointer = NextPointer(Some(next_page_pointer));
-//             Ok(())
-//         }
-//         _ => Err(Error::UnexpectedError),
-//     }
-// }
 
 // Converts a byte to a NodeType.
 impl From<u8> for NodeType {

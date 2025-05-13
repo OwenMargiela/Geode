@@ -1,19 +1,13 @@
 #![allow(unused_variables)] // TODO(you): remove this lint after implementing this mod
 #![allow(dead_code)] // TODO(you): remove this lint after implementing this mod
 
-use std::sync::{
-    atomic::Ordering,
-    Arc, Mutex, RwLock, RwLockReadGuard, RwLockWriteGuard,
-};
+use std::sync::{atomic::Ordering, Arc, Mutex, RwLock, RwLockReadGuard, RwLockWriteGuard};
 
 use hashlink::LinkedHashMap;
 
 use crate::{
-    buffer::buffer_pool_manager::{FrameHeader, FrameId},
-    index::btree::AccessType,
-    utils::replacer::{LRUKReplacer, Replacer},
+    buffer::buffer_pool_manager::{FrameHeader, FrameId}, index::btree::Protocol, utils::replacer::{LRUKReplacer, Replacer}
 };
-
 
 pub enum PageGuard<'a> {
     WriteGuard(WriteGuard<'a>),
@@ -50,7 +44,7 @@ impl<'a> FrameGuard<'a> {
         frame_id: u32,
         replacer: Arc<Mutex<LRUKReplacer<u32>>>,
         guard: RwLockReadGuard<'a, LinkedHashMap<u32, Option<RwLock<FrameHeader>>>>,
-        access_type: AccessType,
+        access_type: Protocol,
     ) -> PageGuard<'a> {
         {
             let frame_guard = guard.get(&frame_id).unwrap().as_ref().expect("Valid frame");
@@ -77,8 +71,8 @@ impl<'a> FrameGuard<'a> {
         };
 
         match access_type {
-            AccessType::Write => PageGuard::WriteGuard(WriteGuard::new(frame)),
-            AccessType::Read => PageGuard::ReadGuard(ReadGuard::new(frame)),
+            Protocol::Exclusive => PageGuard::WriteGuard(WriteGuard::new(frame)),
+            Protocol::Shared => PageGuard::ReadGuard(ReadGuard::new(frame)),
         }
     }
 }

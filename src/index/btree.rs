@@ -1,8 +1,13 @@
 #![allow(unused_variables)] // TODO(you): remove this lint after implementing this mod
 #![allow(dead_code)] // TODO(you): remove this lint after implementing this mod
 
-use std::{cell::RefCell, collections::VecDeque, vec};
+use std::{cell::RefCell, collections::VecDeque, sync::Arc, vec};
 
+use super::{
+    errors::Error,
+    node::Node,
+    node_type::{Key, KeyValuePair, NextPointer, NodeType, PageId},
+};
 use crate::{
     buffer::buffer_pool_manager::{BufferPoolManager, FileId},
     storage::page::{
@@ -10,25 +15,13 @@ use crate::{
     },
 };
 
-use super::{
-    errors::Error,
-    node::Node,
-    node_type::{Key, KeyValuePair, NextPointer, NodeType, PageId},
-};
-
 pub struct ReadContextStack {
     child: PageId,
 }
 
 pub struct WriteContextStack {
-    child: PageId,
+    pub(crate) child: PageId,
 }
-
-pub(crate) enum AccessType {
-    Read,
-    Write,
-}
-/// Crabbing Protocols
 
 #[derive(Clone, Copy)]
 pub enum Protocol {
@@ -45,10 +38,10 @@ pub enum WriteOperation {
 // Flirt with the idea of using a closure to encapsulate all logic needed
 // for reads and writes if needed. Or if I remember >_<
 pub struct BTree {
-    bpm: BufferPoolManager,
+    pub(crate) bpm: Arc<BufferPoolManager>,
     index_name: String,
-    index_file_id: FileId,
-    d: usize,
+    pub index_file_id: FileId,
+    pub(crate) d: usize,
     root_page_id: RefCell<PageId>,
 }
 /// Stack of latched Internal and Leaf nodes
@@ -66,7 +59,7 @@ pub struct Context {
     root_page_id: PageId,
 
     // Store the ids of the pages that you're modifying here.
-    set: Set,
+    pub(crate) set: Set,
 }
 
 impl Context {
@@ -112,7 +105,7 @@ impl BTreeBuilder {
         self
     }
 
-    pub fn build(&self, index_name: String, mut bpm: BufferPoolManager) -> Result<BTree, Error> {
+    pub fn build(&self, index_name: String, bpm: Arc<BufferPoolManager>) -> Result<BTree, Error> {
         let index_file_id = bpm.allocate_file();
         let d: usize = self.d;
 
@@ -164,8 +157,101 @@ impl Default for BTreeBuilder {
 }
 
 impl BTree {
+    pub(crate) fn flush_data(&self, node: &Node, page: u32) {
+        let guard = self.bpm.write_page(self.index_file_id, page);
+        let node_page = BTreePage::try_from(node).unwrap();
+
+        guard
+            .get_frame()
+            .data
+            .copy_from_slice(&node_page.get_data());
+
+        drop(guard);
+    }
+
+    pub fn flush_nodes(&self, nodes: Vec<&Node>) {
+        for node in nodes {
+            self.flush_data(node, node.pointer.unwrap().0.try_into().unwrap());
+        }
+    }
+
+    pub(crate) fn new_root(&self, key: Key, left_child: PageId, right_child: PageId) {
+        let new_root_pointer = PageId(self.bpm.new_page(self.index_file_id).try_into().unwrap());
+
+        let new_root = Node::new(
+            NodeType::Internal(vec![left_child, right_child], vec![key], new_root_pointer),
+            new_root_pointer,
+            true,
+        );
+        let mut page = self.root_page_id.try_borrow_mut().unwrap();
+        *page = new_root_pointer;
+
+        self.flush_data(&new_root, new_root_pointer.0.try_into().unwrap());
+    }
+
+    pub(crate) fn get_gaurd(
+        &self,
+        page_id: PageId,
+        acess_type: Protocol,
+    ) -> Result<PageGuard, Error> {
+        match acess_type {
+            Protocol::Shared => {
+                let read_guard = self
+                    .bpm
+                    .read_page(self.index_file_id, page_id.0.try_into().unwrap());
+
+                return Ok(PageGuard::ReadGuard(read_guard));
+            }
+
+            Protocol::Exclusive => {
+                let write_guard = self
+                    .bpm
+                    .write_page(self.index_file_id, page_id.0.try_into().unwrap());
+
+                return Ok(PageGuard::WriteGuard(write_guard));
+            }
+        }
+    }
+
+    pub(crate) fn get_node_obj(
+        &self,
+        protocol: Protocol,
+        page_id: PageId,
+    ) -> Result<(Node, PageGuard), Error> {
+        match protocol {
+            Protocol::Exclusive => {
+                let page_guard = self
+                    .get_gaurd(page_id, Protocol::Exclusive)
+                    .unwrap()
+                    .into_write_guard()
+                    .unwrap();
+
+                let page_data = page_guard.get_frame().data;
+
+                let page = BTreePage::new(page_data);
+                let node = Node::try_from(page).unwrap();
+
+                return Ok((node, PageGuard::WriteGuard(page_guard)));
+            }
+            Protocol::Shared => {
+                let page_guard = self
+                    .get_gaurd(page_id, Protocol::Shared)
+                    .unwrap()
+                    .into_read_guard()
+                    .unwrap();
+
+                let page_data = page_guard.get_frame().data;
+
+                let page = BTreePage::new(page_data);
+                let node = Node::try_from(page).unwrap();
+
+                return Ok((node, PageGuard::ReadGuard(page_guard)));
+            }
+        }
+    }
+
     // Returns the node, if we can borrow from it and whether or not its the left node
-    pub fn find_rebalance_candidate(
+    pub(crate) fn find_rebalance_candidate(
         &self,
         node: &Node,
         page_id: PageId,
@@ -179,8 +265,6 @@ impl BTree {
                     }
                 };
 
-                println!("\n\n\nKeys {:?}", keys);
-                println!("children {:?}\n\n\n", children);
                 let sparator_key = keys.get(node_idx).unwrap_or_else(|| &keys[node_idx - 1]);
 
                 let mut candidate_index = node_idx + 1;
@@ -210,100 +294,8 @@ impl BTree {
         }
     }
 
-    pub fn flush_data(&self, node: &Node, page: u32) {
-        // println!("\nObtaining write guard in flush data");
-        let guard = self.bpm.write_page(self.index_file_id, page);
-        let node_page = BTreePage::try_from(node).unwrap();
-
-        guard
-            .get_frame()
-            .data
-            .copy_from_slice(&node_page.get_data());
-
-        drop(guard);
-    }
-
-    pub fn flush_nodes(&self, nodes: Vec<&Node>) {
-        for node in nodes {
-            self.flush_data(node, node.pointer.unwrap().0.try_into().unwrap());
-        }
-    }
-
-    pub fn new_root(&self, key: Key, left_child: PageId, right_child: PageId) {
-        let new_root_pointer = PageId(self.bpm.new_page(self.index_file_id).try_into().unwrap());
-
-        let new_root = Node::new(
-            NodeType::Internal(vec![left_child, right_child], vec![key], new_root_pointer),
-            new_root_pointer,
-            true,
-        );
-        let mut page = self.root_page_id.try_borrow_mut().unwrap();
-        *page = new_root_pointer;
-
-        // println!("\n\n\nCheckpoint new rooot {:?}\n\n\n", new_root_pointer);
-
-        self.flush_data(&new_root, new_root_pointer.0.try_into().unwrap());
-    }
-
-    pub fn get_gaurd(&self, page_id: PageId, acess_type: AccessType) -> Result<PageGuard, Error> {
-        match acess_type {
-            AccessType::Read => {
-                let read_guard = self
-                    .bpm
-                    .read_page(self.index_file_id, page_id.0.try_into().unwrap());
-
-                return Ok(PageGuard::ReadGuard(read_guard));
-            }
-
-            AccessType::Write => {
-                let write_guard = self
-                    .bpm
-                    .write_page(self.index_file_id, page_id.0.try_into().unwrap());
-
-                return Ok(PageGuard::WriteGuard(write_guard));
-            }
-        }
-    }
-
-    pub fn get_node_obj(
-        &self,
-        protocol: Protocol,
-        page_id: PageId,
-    ) -> Result<(Node, PageGuard), Error> {
-        match protocol {
-            Protocol::Exclusive => {
-                let page_guard = self
-                    .get_gaurd(page_id, AccessType::Write)
-                    .unwrap()
-                    .into_write_guard()
-                    .unwrap();
-
-                let page_data = page_guard.get_frame().data;
-
-                let page = BTreePage::new(page_data);
-                let node = Node::try_from(page).unwrap();
-
-                return Ok((node, PageGuard::WriteGuard(page_guard)));
-            }
-            Protocol::Shared => {
-                let page_guard = self
-                    .get_gaurd(page_id, AccessType::Read)
-                    .unwrap()
-                    .into_read_guard()
-                    .unwrap();
-
-                let page_data = page_guard.get_frame().data;
-
-                let page = BTreePage::new(page_data);
-                let node = Node::try_from(page).unwrap();
-
-                return Ok((node, PageGuard::ReadGuard(page_guard)));
-            }
-        }
-    }
-
     // obtains a latch on the parent
-    pub fn match_protocol(&self, protocol: Protocol) -> Result<(Node, Context), Error> {
+    pub(crate) fn match_protocol(&self, protocol: Protocol) -> Result<(Node, Context), Error> {
         let mut _btree_page: BTreePage = BTreePage {
             data: [0u8; PAGE_SIZE],
         };
@@ -362,7 +354,7 @@ impl BTree {
         Ok((root_node, context))
     }
 
-    pub fn tree_descent(
+    pub(crate) fn tree_descent(
         &self,
         search_key: Key,
         protocol: Protocol,
@@ -378,7 +370,7 @@ impl BTree {
 
     /// Descends towards the desired leaf node while aquiring read/write latches
     /// Returns the gaurds of all the nodes needed for the operation
-    pub fn latch_sub_tree<'a>(
+    pub(crate) fn latch_sub_tree<'a>(
         &'a self,
         parent: Node,
         search: Key,
@@ -417,7 +409,6 @@ impl BTree {
                                 child: child_pointer,
                             });
                         } else {
-                            // println!("Not safe");
                             stack.push_front(WriteContextStack {
                                 child: child_pointer,
                             });
@@ -429,12 +420,7 @@ impl BTree {
                     }
 
                     Set::ReadStack(ref mut stack) => {
-                        println!("Children {:?}", children);
                         let (child_node, _) = self.get_node_obj(Protocol::Shared, child_pointer)?;
-
-                        // println!("child node {:?}", child_node);
-
-                        // let read_gaurd = child_guard.into_read_guard().expect("Page Gaurd");
 
                         stack.push_front(ReadContextStack {
                             child: child_pointer,
@@ -456,7 +442,11 @@ impl BTree {
         }
     }
 
-    pub fn propogate_upwards(&self, mut node: Node, mut context: Context) -> Result<(), Error> {
+    pub(crate) fn propogate_upwards(
+        &self,
+        mut node: Node,
+        mut context: Context,
+    ) -> Result<(), Error> {
         let mut was_root = node.is_root;
 
         let page_id = match context.set {
@@ -471,12 +461,9 @@ impl BTree {
         ))?;
 
         node.set_next_pointer(sibling.pointer.unwrap().0.to_le_bytes())?;
-        sibling.set_next_pointer(node.pointer.unwrap().0.to_le_bytes())?;
+        sibling.set_next_pointer([0u8; 8])?;
 
         self.flush_nodes(vec![&sibling, &node]);
-        // self.flush_data(&sibling, sibling.pointer.unwrap().0.try_into().unwrap());
-
-        self.flush_data(&node, page_id.child.0.try_into().unwrap());
 
         if was_root {
             self.new_root(median.clone(), page_id.child, sibling.pointer.unwrap());
@@ -537,7 +524,7 @@ impl BTree {
         }
     }
 
-    pub fn borrow_if_needed(
+    pub(crate) fn borrow_if_needed(
         &self,
         child_id: PageId,
         child_node: Node,
@@ -569,11 +556,6 @@ impl BTree {
                     separator_key.clone(),
                 )?;
 
-                println!(
-                    "Post Borrow {:?} \n {:?}\n\n\nSeparator {:?}\n\n\n\n",
-                    current_node, current_candidate, separator_key
-                );
-
                 drop(context);
                 // Write to disk
                 self.flush_nodes(vec![
@@ -585,22 +567,13 @@ impl BTree {
                 return Ok(());
             }
 
-            println!("\n\n\nMERGING\n\n\n");
             match current_node.node_type {
                 NodeType::Internal(_, _, _) => {
-                    println!(
-                        "Merge Internal {:?}\nWITH\n{:?}\n\n\n",
-                        current_node, current_candidate
-                    );
                     current_node.merge_internal(&current_candidate)?;
 
                     current_node.insert_key(separator_key.clone())?;
                 }
                 NodeType::Leaf(_, _, _) => {
-                    println!(
-                        "Merge Leaf {:?}\nWITH\n{:?}\n\n\n",
-                        current_node, current_candidate
-                    );
                     current_node.merge_leaf(&current_candidate)?;
                 }
                 NodeType::Unexpected => {
@@ -612,9 +585,7 @@ impl BTree {
                 .remove_sibling_node(separator_key.clone(), current_candidate.pointer.unwrap())?;
 
             if let Ok(size) = current_parent_node.get_number_of_children() {
-                println!("Getting number of children");
                 if size < 2 && current_parent_node.is_root {
-                    println!("root made");
                     current_node.is_root = true;
                     current_parent_node.is_root = false;
 
@@ -622,7 +593,6 @@ impl BTree {
                     *root_page = current_node.pointer.unwrap();
                 }
             }
-            println!("Post Merge Leaf {:?}", current_node);
 
             self.flush_nodes(vec![
                 &current_node,
@@ -651,78 +621,12 @@ impl BTree {
                 current_candidate = candidate;
                 current_parent_node = parent_node;
             }
-            println!("Continuing loop");
         }
-    }
-
-    pub fn insert(&self, entry: KeyValuePair) -> Result<(), Error> {
-        let key = Key(entry.key);
-
-        let (mut leaf_node, mut context) =
-            self.tree_descent(key, Protocol::Exclusive, WriteOperation::Insert)?;
-
-        leaf_node.insert_entry(entry)?;
-
-        if leaf_node.get_key_array_length() < 2 * self.d {
-            let stack = match &mut context.set {
-                Set::WriteStack(stack) => stack,
-                _ => return Err(Error::UnexpectedError),
-            };
-
-            // Update the leaf_node data using the WriteGuard<'_>
-            let pointer = stack.pop_front().unwrap().child;
-
-            self.flush_data(&leaf_node, pointer.0.try_into().unwrap());
-
-            drop(context);
-            return Ok(());
-        } else if leaf_node.get_key_array_length() >= 2 * self.d {
-            self.propogate_upwards(leaf_node, context)?;
-        }
-
-        Ok(())
-    }
-
-    pub fn delete(&self, search: &Key) -> Result<(), Error> {
-        let (mut leaf_node, mut context) =
-            self.tree_descent(search.clone(), Protocol::Exclusive, WriteOperation::Delete)?;
-
-        println!("\n\n\nLeaf\n\n\n{:?}", leaf_node);
-        leaf_node.remove_entry(search)?;
-
-        // Simple Delete No Split
-
-        if leaf_node.get_key_array_length() >= self.d - 1 || leaf_node.is_root {
-            println!("No split");
-            match &mut context.set {
-                Set::WriteStack(stack) => stack.front().unwrap(),
-                _ => return Err(Error::UnexpectedError),
-            };
-
-            // write update to disk
-            self.flush_data(&leaf_node, leaf_node.pointer.unwrap().0.try_into().unwrap());
-            drop(context);
-            return Ok(());
-        } else {
-            println!("Borrowing because we need to");
-            let leaf_node_id = match &mut context.set {
-                Set::WriteStack(stack) => {
-                    let child = stack.pop_front().unwrap().child;
-                    child
-                }
-                _ => return Err(Error::UnexpectedError),
-            };
-            println!("Leaf Node {:?}\n\n\n", leaf_node);
-            self.borrow_if_needed(leaf_node_id, leaf_node, context)?;
-        }
-
-        Ok(())
     }
 
     pub fn find_node(&self, search: &Key) -> Result<Node, Error> {
         let (node, _) = self.match_protocol(Protocol::Shared)?;
 
-        println!("Leaf checkpoint");
         if let NodeType::Leaf(_, _, _) = node.node_type {
             if node.find_key_value(search).is_ok() {
                 return Ok(node);
@@ -730,9 +634,6 @@ impl BTree {
                 return Err(Error::UnexpectedError);
             }
         }
-
-        println!("None Leaf checkpoint");
-        // println!("Root Node Object {:?}", node);
 
         let mut current_node = node;
         loop {
@@ -766,6 +667,31 @@ impl BTree {
         }
     }
 
+    pub fn find_min(&self) -> Result<Node, Error> {
+        let (node, _) = self.match_protocol(Protocol::Shared)?;
+
+        if let NodeType::Leaf(ref entries, _, _) = node.node_type {
+            return Ok(node);
+        }
+
+        let mut current_node = node;
+        loop {
+            match &current_node.node_type {
+                NodeType::Internal(ref children, ref keys, _) => {
+                    let child_pointer = children.get(0).unwrap().clone();
+
+                    (current_node, _) = self.get_node_obj(Protocol::Shared, child_pointer).unwrap();
+                }
+                NodeType::Leaf(_, _, _) => {
+                    return Ok(current_node);
+                }
+                _ => {
+                    return Err(Error::UnexpectedError);
+                }
+            }
+        }
+    }
+
     pub fn search(&self, search: Key) -> Result<KeyValuePair, Error> {
         let (node, context) = self.match_protocol(Protocol::Shared)?;
 
@@ -774,20 +700,17 @@ impl BTree {
             return Ok(kv_pair);
         }
 
-        // println!("Root Node Object {:?}", node);
         let kv_pair: Option<KeyValuePair>;
         let mut current_node = node;
         loop {
             match &current_node.node_type {
                 NodeType::Internal(ref children, ref keys, _) => {
-                    // println!("Current {:?}", current_node);
                     let idx = keys.binary_search(&search).unwrap_or_else(|x| x);
 
                     if idx >= keys.len() || keys[idx] != search {
                         let child_pointer = children.get(idx).unwrap().clone();
                         (current_node, _) = self.get_node_obj(Protocol::Shared, child_pointer)?;
                     } else {
-                        // println!("Search {:?} found key {:?}", search, keys[idx]);
                         (current_node, _) = self.get_node_obj(
                             Protocol::Shared,
                             children.get(idx + 1).unwrap().clone(),
@@ -809,22 +732,11 @@ impl BTree {
         Ok(kv_pair.unwrap())
     }
 
-    pub fn get_value(&self, search: Key) -> Result<Key, Error> {
-        let found_node = self.find_node(&search).unwrap();
-        let key = found_node.find_key(search)?;
-        Ok(key)
-    }
-
-    pub fn get_entry(&self, search: Key) -> Result<KeyValuePair, Error> {
-        let found_node = self.find_node(&search).unwrap();
-        let entry = found_node.find_key_value(&search)?;
-        Ok(entry)
-    }
-
-    pub fn print(&self) {
+    pub(crate) fn print(&self) {
         let (root_node, _) = self.match_protocol(Protocol::Shared).unwrap();
         self.print_tree(&root_node, 0);
     }
+
     fn print_tree(&self, node: &Node, depth: usize) {
         match &node.node_type {
             NodeType::Internal(children, keys, current) => {
@@ -856,7 +768,7 @@ impl BTree {
                         u32::from_le_bytes(entry.value.slot_index),
                     );
                 }
-                println!("\n], current {:?}\n ", current);
+                println!("\n], current {:?} next {:?} \n ", current, next);
             }
             NodeType::Unexpected => {
                 return;

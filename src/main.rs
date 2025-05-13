@@ -1,9 +1,11 @@
 mod buffer;
 mod catalog;
 mod db_types;
-mod storage;
-mod utils;
-mod tests;
+
 mod index;
+mod iterators;
+mod storage;
+mod tests;
+mod utils;
 
 fn main() {}

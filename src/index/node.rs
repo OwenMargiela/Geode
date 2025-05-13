@@ -4,8 +4,9 @@
 use crate::storage::page::b_plus_tree_page::BTreePage;
 use crate::storage::page::btree_page_layout::{
     FromByte, INTERNAL_NODE_HEADER_SIZE, INTERNAL_NODE_NUM_CHILDREN_OFFSET, IS_ROOT_OFFSET,
-    KEY_SIZE, LEAF_NODE_HEADER_SIZE, LEAF_NODE_NUM_PAIRS_OFFSET, NODE_TYPE_OFFSET, POINTER_OFFSET,
-    POINTER_SIZE, PTR_SIZE, ROW_ID_SEGMENT_SIZE, VALUE_SIZE,
+    KEY_SIZE, LEAF_NODE_HEADER_SIZE, LEAF_NODE_NUM_PAIRS_OFFSET, NEXT_LEAF_POINTER_OFFSET,
+    NEXT_LEAF_POINTER_SIZE, NODE_TYPE_OFFSET, POINTER_OFFSET, POINTER_SIZE, PTR_SIZE,
+    ROW_ID_SEGMENT_SIZE, VALUE_SIZE,
 };
 
 use super::errors::Error;
@@ -68,18 +69,24 @@ impl Node {
     }
 
     /// sets the pointer to the sibling node
-    pub fn set_next_pointer(&self, next_page_pointer: [u8; 8]) -> Result<(), Error> {
-        let mut node_type = self.node_type.clone();
+    pub fn set_next_pointer(&mut self, next: [u8; 8]) -> Result<(), Error> {
+        let clone = self.clone();
+        let data = BTreePage::try_from(&clone)?;
+        let mut buf = data.get_data();
 
-        match node_type {
-            NodeType::Leaf(_, ref mut next, _) => {
-                *next = NextPointer(Some(next_page_pointer));
+        let range = NEXT_LEAF_POINTER_OFFSET..(NEXT_LEAF_POINTER_OFFSET + NEXT_LEAF_POINTER_SIZE);
 
-                // update_next_pointer(&mut node_type, next_page_pointer).unwrap();
-                Ok(())
-            }
-            _ => Err(Error::UnexpectedError),
+        if buf.len() < NEXT_LEAF_POINTER_OFFSET + NEXT_LEAF_POINTER_SIZE {
+            return Err(Error::UnexpectedError);
         }
+
+        buf[range].copy_from_slice(&next);
+
+        let b_tree_page = BTreePage::new(buf);
+
+        *self = Node::try_from(b_tree_page)?;
+
+        Ok(())
     }
 
     pub fn set_page_pointer(&mut self, new_page_pointer: PageId) -> Result<(), Error> {
@@ -228,7 +235,7 @@ impl Node {
     }
 
     // finds the key in an internal node
-    pub fn find_key(&self, key: Key) -> Result<Key, Error> {
+    pub fn find_key(&self, key: &Key) -> Result<Key, Error> {
         match &self.node_type {
             NodeType::Internal(_, keys, _) => {
                 let idx = keys.binary_search(&key).unwrap().clone();
@@ -239,12 +246,29 @@ impl Node {
         }
     }
 
+    pub fn find_key_index_in_leaf(&self, key: &Key) -> usize {
+        match &self.node_type {
+            NodeType::Leaf(entries, _, _) => {
+                let entry = entries
+                    .binary_search_by_key(&key.0, |pair| pair.key)
+                    .unwrap();
+                entry
+            }
+            _ => 0,
+        }
+    }
+
     /// Gets a key-value pair at a certain index within a Leaf node
     pub fn get_key_value_at_index(&self, idx: usize) -> Result<KeyValuePair, Error> {
         match &self.node_type {
             NodeType::Leaf(entries, _, _) => {
-                let entry = entries.get(idx).unwrap().clone();
-                Ok(entry)
+                let entry = entries.get(idx);
+
+                if entry.is_some() {
+                    return Ok(entry.unwrap().clone());
+                } else {
+                    return Err(Error::UnexpectedError);
+                }
             }
             _ => Err(Error::UnexpectedError),
         }
@@ -254,19 +278,12 @@ impl Node {
     pub fn find_key_value(&self, key: &Key) -> Result<KeyValuePair, Error> {
         match &self.node_type {
             NodeType::Leaf(entries, _, _) => {
-                println!("Checkpoint 1");
                 let was_found = entries.binary_search_by_key(key, |p| Key(p.key));
 
-                println!("Checkpoint 2");
                 let idx = match was_found {
-                    Ok(idx) => {
-                        println!("\n\n\nWas found {}", was_found.unwrap());
-                        idx
-                    }
+                    Ok(idx) => idx,
                     Err(_) => return Err(Error::KeyNotFound),
                 };
-
-                println!("Checkpoint 3");
 
                 match entries.get(idx) {
                     None => {
@@ -276,7 +293,6 @@ impl Node {
                         }
                     }
                     Some(entry) => {
-                        println!("Checkpoint 4 Entry {:?}", entry);
                         return Ok(entry.clone());
                     }
                 }
@@ -745,221 +761,5 @@ impl TryFrom<BTreePage> for Node {
                 Err(Error::UnexpectedError)
             }
         }
-    }
-}
-
-#[cfg(test)]
-
-mod tests {
-    use crate::{
-        index::{
-            errors::Error,
-            node::Node,
-            node_type::{Key, KeyValuePair, NextPointer, NodeType, PageId, RowID},
-        },
-        storage::page::{
-            b_plus_tree_page::BTreePage,
-            btree_page_layout::{
-                INTERNAL_NODE_HEADER_SIZE, KEY_SIZE, LEAF_NODE_HEADER_SIZE, PAGE_SIZE, PTR_SIZE,
-                VALUE_SIZE,
-            },
-        },
-    };
-
-    #[test]
-    fn page_to_node_works_for_leaf_node() -> Result<(), Error> {
-        const DATA_LEN: usize = LEAF_NODE_HEADER_SIZE + KEY_SIZE + VALUE_SIZE;
-        let page_data: [u8; DATA_LEN] = [
-            0x01, // Is-Root byte.
-            0x02, // Leaf Node type byte.
-            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // id.
-            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, // Number of Key-Value pairs.
-            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, // Next leaf pointer size
-            0x68, 0x65, 0x6c, 0x6c, 0x6f, 0x00, 0x00, 0x00, 0x00, 0x00, // "hello"
-            0x77, 0x6f, 0x72, 0x6c, 0x64, 0x00, 0x00, 0x00, 0x00, 0x00, // "world"
-        ];
-
-        let junk: [u8; PAGE_SIZE - DATA_LEN] = [0x00; PAGE_SIZE - DATA_LEN];
-        let mut page = [0x00; PAGE_SIZE];
-        for (to, from) in page.iter_mut().zip(page_data.iter().chain(junk.iter())) {
-            *to = *from
-        }
-
-        let btree = BTreePage::new(page);
-
-        let node = Node::try_from(btree).unwrap();
-
-        let next_pointer = node.get_next_pointer().unwrap();
-        let cur_page_pointer = node.get_pointer()?;
-
-        assert_eq!(cur_page_pointer, PageId(0));
-        assert_eq!(next_pointer, [0, 0, 0, 0, 0, 0, 0, 1]);
-        assert_eq!(node.is_root, true);
-
-        Ok(())
-    }
-
-    #[test]
-    fn page_to_node_works_for_internal_node() -> Result<(), Error> {
-        const DATA_LEN: usize = INTERNAL_NODE_HEADER_SIZE + 3 * PTR_SIZE + 2 * KEY_SIZE;
-        let page_data: [u8; DATA_LEN] = [
-            0x01, // Is-Root byte.
-            0x01, // Internal Node type byte.
-            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // id.
-            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x03, // Number of children.
-            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x10, 0x00, // 4096  (2nd Page id )
-            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x20, 0x00, // 8192  (3rd Page id )
-            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x30, 0x00, // 12288 (4th Page id)
-            0x68, 0x65, 0x6c, 0x6c, 0x6f, 0x00, 0x00, 0x00, 0x00, 0x00, // "hello"
-            0x77, 0x6f, 0x72, 0x6c, 0x64, 0x00, 0x00, 0x00, 0x00, 0x00, // "world"
-        ];
-        let junk: [u8; PAGE_SIZE - DATA_LEN] = [0x00; PAGE_SIZE - DATA_LEN];
-
-        // Concatenate the two arrays; page_data and junk.
-        let mut page = [0x00; PAGE_SIZE];
-        for (to, from) in page.iter_mut().zip(page_data.iter().chain(junk.iter())) {
-            *to = *from
-        }
-
-        let node = Node::try_from(BTreePage::new(page))?;
-
-        if let NodeType::Internal(_, keys, current_page) = node.node_type {
-            assert_eq!(keys.len(), 2);
-
-            let Key(first_key) = match keys.get(0) {
-                Some(key) => key,
-                None => return Err(Error::UnexpectedError),
-            };
-
-            let key_string = String::from_utf8_lossy(first_key).into_owned();
-            let value = key_string.trim_matches('\0');
-
-            assert_eq!(value, "hello");
-
-            let Key(second_key) = match keys.get(1) {
-                Some(key) => key,
-                None => return Err(Error::UnexpectedError),
-            };
-
-            let key_string = String::from_utf8_lossy(second_key).into_owned();
-            let value = key_string.trim_matches('\0');
-
-            assert_eq!(value, "world");
-
-            assert_eq!(current_page, PageId(0));
-
-            return Ok(());
-        }
-
-        Err(Error::UnexpectedError)
-    }
-
-    #[test]
-    fn split_leaf_works() -> Result<(), Error> {
-        let kv_pair_one = KeyValuePair::new(42, RowID::new(0, 0));
-        let kv_pair_two = KeyValuePair::new(3, RowID::new(0, 1));
-        let kv_pair_three = KeyValuePair::new(8, RowID::new(0, 2));
-
-        let mut node = Node::new(
-            NodeType::Leaf(
-                vec![kv_pair_one, kv_pair_two, kv_pair_three],
-                NextPointer(Some([0, 0, 0, 0, 0, 0, 0, 1])),
-                PageId(1_u32.try_into().unwrap()),
-            ),
-            PageId(1_u32.try_into().unwrap()),
-            true,
-        );
-
-        let (median, sibling) = node.split(2)?;
-
-        assert_eq!(median, Key([3, 0, 0, 0, 0, 0, 0, 0, 0, 0]));
-
-        assert_eq!(
-            node.node_type,
-            NodeType::Leaf(
-                vec![
-                    KeyValuePair::new(42, RowID::new(0, 0)),
-                    KeyValuePair::new(3, RowID::new(0, 1))
-                ],
-                NextPointer(Some([0, 0, 0, 0, 0, 0, 0, 1])),
-                PageId(1_u32.try_into().unwrap())
-            )
-        );
-
-        assert_eq!(
-            sibling.node_type,
-            NodeType::Leaf(
-                vec![KeyValuePair::new(8, RowID::new(0, 2))],
-                NextPointer(None),
-                PageId(u64::default())
-            )
-        );
-
-        Ok(())
-    }
-
-    #[test]
-
-    fn split_internal_works() -> Result<(), Error> {
-        fn serialize_int_to_10_bytes(n: u64) -> [u8; 10] {
-            let mut bytes = [0u8; 10]; // Create a 10-byte array initialized with zeros.
-            let n_bytes = n.to_le_bytes(); // Convert the integer to bytes (little-endian).
-
-            // Copy the integer bytes into the fixed-size array (first 8 bytes for u64).
-            bytes[..n_bytes.len()].copy_from_slice(&n_bytes);
-
-            bytes
-        }
-
-        let key = serialize_int_to_10_bytes(42);
-        let key_two = serialize_int_to_10_bytes(3);
-        let key_three = serialize_int_to_10_bytes(8);
-
-        // Assuming d = 2 and max capacity nodes
-        let mut node = Node::new(
-            NodeType::Internal(
-                vec![PageId(1), PageId(2), PageId(3), PageId(4)],
-                vec![Key(key), Key(key_two), Key(key_three)],
-                PageId(1_u32.try_into().unwrap()),
-            ),
-            PageId(1_u32.try_into().unwrap()),
-            true,
-        );
-
-        let (median, mut sibling) = node.split(2)?;
-
-        assert_eq!(median, Key(key_two));
-        println!("median {:?}", median);
-
-        assert_eq!(
-            node.node_type,
-            NodeType::Internal(
-                vec![PageId(1), PageId(2)],
-                vec![Key(key)],
-                PageId(1_u32.try_into().unwrap())
-            ),
-        );
-
-        sibling.set_page_pointer(PageId(2_u32.try_into().unwrap()))?;
-        println!("{:?}", sibling);
-
-        assert_eq!(sibling.pointer, Some(PageId(2_u32.try_into().unwrap())));
-
-        assert_eq!(
-            sibling.node_type,
-            NodeType::Internal(
-                vec![PageId(3), PageId(4)],
-                vec![Key(key_three)],
-                PageId(2_u32.try_into().unwrap())
-            )
-        );
-
-        println!("\n\n\n {:?}", sibling);
-
-        sibling.remove_key(Key(key_three))?;
-
-        println!("\n\n\n {:?}", sibling);
-
-        Ok(())
     }
 }

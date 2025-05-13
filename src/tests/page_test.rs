@@ -21,7 +21,7 @@ pub mod test {
 
         let manager = Manager::new(log_io, log_file_path);
 
-        let mut bpm = BufferPoolManager::new(NUM_FRAMES, manager, K_DIST);
+        let bpm = BufferPoolManager::new(NUM_FRAMES, manager, K_DIST);
 
         let file_id = bpm.allocate_file();
 

@@ -14,7 +14,7 @@ use dashmap::DashMap;
 use hashlink::LinkedHashMap;
 
 use crate::{
-    index::btree::AccessType,
+    index::btree::Protocol,
     storage::{
         disk::{
             manager::Manager,
@@ -48,15 +48,15 @@ pub struct FrameHeader {
 type FilePageMap = HashMap<PageId, Option<FrameId>>;
 
 type RwLinkMap<K, V> = RwLock<LinkedHashMap<K, V>>;
+type FrameOption = Option<RwLock<FrameHeader>>;
 
 pub struct BufferPoolManager {
     num_frames: usize,
     next_page_id: AtomicU32,
 
     // The frame headers of the frames that this buffer pool manages
-    frames: Arc<RwLinkMap<FrameId, Option<RwLock<FrameHeader>>>>,
+    frames: Arc<RwLinkMap<FrameId, FrameOption>>,
 
-    // Replace with flurry
     // File ID to file page map
     file_page_map: Arc<DashMap<FileId, FilePageMap>>,
 
@@ -104,7 +104,7 @@ impl BufferPoolManager {
 
     // Allocates a new File on disk
 
-    pub fn allocate_file(&mut self) -> FileId {
+    pub fn allocate_file(&self) -> FileId {
         let manager = &self.manager;
         let mut manager_guard = manager.lock().unwrap();
 
@@ -194,7 +194,7 @@ impl BufferPoolManager {
         &self,
         file_id: FileId,
         page_id: PageId,
-        access_type: AccessType,
+        access_type: Protocol,
     ) -> Option<PageGuard> {
         let frame_id: Option<u32>;
 
@@ -391,35 +391,35 @@ impl BufferPoolManager {
         frame_guard.insert(frame_id, Some(RwLock::new(frame)));
         drop(frame_guard);
 
-        // println!("Dropped gaurd in frame");
+      
     }
 
-    pub(self) fn create_guard(&self, frame_id: FrameId, access_type: AccessType) -> PageGuard {
+    pub(self) fn create_guard(&self, frame_id: FrameId, access_type: Protocol) -> PageGuard {
         // Acquire the read lock for the frames map
         let frame_guard = self.frames.read().unwrap();
         FrameGuard::new(frame_id, self.replacer.clone(), frame_guard, access_type)
     }
 
     pub(self) fn check_write_page(&self, file_id: u64, page_id: PageId) -> Option<WriteGuard> {
-        self.check_page(file_id, page_id, AccessType::Write)
+        self.check_page(file_id, page_id, Protocol::Exclusive)
             .map(|guard| guard.into_write_guard())
             .expect("Guard Error")
     }
 
     pub(self) fn check_read_page(&self, file_id: u64, page_id: PageId) -> Option<ReadGuard> {
-        self.check_page(file_id, page_id, AccessType::Read)
+        self.check_page(file_id, page_id, Protocol::Shared)
             .map(|guard| guard.into_read_guard())
             .expect("Guard Error")
     }
 
     pub(crate) fn write_page(&self, file_id: u64, page_id: PageId) -> WriteGuard {
-        // println!("Trying to obtain lock on {}", page_id);
+     
 
         let guard = self
             .check_write_page(file_id, page_id)
             .expect("Write lock error");
 
-        // println!(" obtained lock on {}", page_id);
+
 
         guard
     }
