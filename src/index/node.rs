@@ -727,7 +727,6 @@ impl TryFrom<BTreePage> for Node {
                     offset += KEY_SIZE;
 
                     let value_raw = page.get_ptr_from_offset(offset, VALUE_SIZE);
-
                     let value: [u8; 10] = value_raw.try_into().unwrap();
 
                     // default values

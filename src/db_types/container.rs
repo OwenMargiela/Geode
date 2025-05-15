@@ -26,102 +26,102 @@ pub mod data_type_string {
 
 pub struct SchemaDataValue<'a> {
     pub column_name: &'a str,
-    pub data: ByteBox<'a>,
+    pub data: ByteBox,
 }
 
-#[derive(Clone)]
-pub struct ByteBox<'a> {
+#[derive(PartialEq, Eq, Clone, Debug)]
+pub struct ByteBox {
     pub data: Vec<u8>,
-    pub datatype: &'a str,
+    pub datatype: String,
     pub data_size: usize,
     pub data_length: u8,
 }
 
-impl<'a> ByteBox<'a> {
-    pub fn new(data: Vec<u8>, datatype: &'a str) -> ByteBox<'a> {
+impl ByteBox {
+    pub fn new(data: Vec<u8>, datatype: String) -> ByteBox {
         let len = data.len();
         ByteBox {
             data: data,
             data_length: len as u8,
             data_size: len,
-            datatype: &datatype,
+            datatype: datatype,
         }
     }
 
-    pub fn big_int(val: i64) -> ByteBox<'a> {
+    pub fn big_int(val: i64) -> ByteBox {
         let mut buffer: Vec<u8> = Vec::new();
         buffer
             .write_i64::<LittleEndian>(val)
             .expect("Error writing a signed 64 bit integer");
 
-        ByteBox::new(buffer, data_type_string::BIGINT)
+        ByteBox::new(buffer, data_type_string::BIGINT.to_string())
     }
 
-    pub fn int(val: i32) -> ByteBox<'a> {
+    pub fn int(val: i32) -> ByteBox {
         let mut buffer: Vec<u8> = Vec::new();
         buffer
             .write_i32::<LittleEndian>(val)
             .expect("Error writing a signed 32 bit integer");
 
-        ByteBox::new(buffer, data_type_string::INT)
+        ByteBox::new(buffer, data_type_string::INT.to_string())
     }
 
-    pub fn small_int(val: i16) -> ByteBox<'a> {
+    pub fn small_int(val: i16) -> ByteBox {
         let mut buffer: Vec<u8> = Vec::new();
         buffer
             .write_i16::<LittleEndian>(val)
             .expect("Error writing a signed 16 bit integer");
 
-        ByteBox::new(buffer, data_type_string::SMALLINT)
+        ByteBox::new(buffer, data_type_string::SMALLINT.to_string())
     }
 
-    pub fn decimal(val: f32) -> ByteBox<'a> {
+    pub fn decimal(val: f32) -> ByteBox {
         let mut buffer: Vec<u8> = Vec::new();
         buffer
             .write_f32::<LittleEndian>(val)
             .expect("Error writing a IEEE754 single-precision (4 bytes) floating point number");
 
-        ByteBox::new(buffer, data_type_string::DECIMAL)
+        ByteBox::new(buffer, data_type_string::DECIMAL.to_string())
     }
 
-    pub fn char(val: &str, charlen: usize) -> ByteBox<'a> {
+    pub fn char(val: &str, charlen: usize) -> ByteBox {
         let char = Char::new(val, charlen);
         let data = char.get_raw_bytes();
         let len = data.len();
 
         ByteBox {
             data: data,
-            datatype: data_type_string::CHAR,
+            datatype: data_type_string::CHAR.to_string(),
             data_size: len,
             data_length: len as u8,
         }
     }
 
-    pub fn varchar(val: &str, charlen: usize) -> ByteBox<'a> {
+    pub fn varchar(val: &str, charlen: usize) -> ByteBox {
         let varchar = Varchar::new(val, charlen);
         let data = varchar.get_raw_bytes();
         let len = data.len();
 
         ByteBox {
             data: data,
-            datatype: data_type_string::VARCHAR,
+            datatype: data_type_string::VARCHAR.to_string(),
             data_size: charlen,
             data_length: len as u8,
         }
     }
 
-    pub fn boolean(val: bool) -> ByteBox<'a> {
+    pub fn boolean(val: bool) -> ByteBox {
         let val = val as u8;
         let mut buffer: Vec<u8> = Vec::new();
         buffer
             .write_u8(val)
             .expect("Error Writing an unsigned 8 bit integer");
 
-        ByteBox::new(buffer, data_type_string::BOOLEAN)
+        ByteBox::new(buffer, data_type_string::BOOLEAN.to_string())
     }
 }
 
-pub trait DataBox<'a, T> {
+pub trait DataBox<T> {
     type Output;
     type Input;
 
@@ -139,7 +139,7 @@ pub trait DataBox<'a, T> {
 }
 
 // Trait for all numeric types
-pub trait NumbericType<'a>: DataBox<'a, Self::Value>
+pub trait NumbericType<'a>: DataBox<Self::Value>
 where
     Self::Value: PartialOrd + Ord,
     Self::Value: Add<Output = Self> + Sub<Output = Self> + Mul<Output = Self> + Div<Output = Self>,

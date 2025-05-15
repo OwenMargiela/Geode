@@ -43,7 +43,7 @@ impl<'a> Serializable for Decimal<'a> {
     }
 }
 
-impl<'a> DataBox<'a, Decimal<'a>> for Decimal<'a> {
+impl<'a> DataBox<Decimal<'a>> for Decimal<'a> {
     type Output = f32;
     type Input = f32;
 
@@ -91,12 +91,12 @@ impl<'a> DataBox<'a, Decimal<'a>> for Decimal<'a> {
         self.type_id_string
     }
 
-    fn to_byte_box(&self) -> ByteBox<'a> {
+    fn to_byte_box(&self) -> ByteBox {
         let mut buffer: Vec<u8> = Vec::new();
         self.serialize(&mut buffer)
             .expect("Error during serialization");
 
-        ByteBox::new(buffer, &self.type_id_string)
+        ByteBox::new(buffer, self.type_id_string.to_string())
     }
 }
 

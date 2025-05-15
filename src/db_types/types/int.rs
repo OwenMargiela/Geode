@@ -44,7 +44,7 @@ impl<'a> Serializable for Int<'a> {
     }
 }
 
-impl<'a> DataBox<'a, Int<'a>> for Int<'a> {
+impl<'a> DataBox< Int<'a>> for Int<'a> {
     type Output = i32;
     type Input = i32;
 
@@ -99,12 +99,12 @@ impl<'a> DataBox<'a, Int<'a>> for Int<'a> {
         self.type_id_string
     }
 
-    fn to_byte_box(&self) -> ByteBox<'a> {
+    fn to_byte_box(&self) -> ByteBox {
         let mut buffer: Vec<u8> = Vec::new();
         self.serialize(&mut buffer)
             .expect("Error during serialization");
 
-        ByteBox::new(buffer, &self.type_id_string)
+        ByteBox::new(buffer, self.type_id_string.to_string())
     }
 }
 

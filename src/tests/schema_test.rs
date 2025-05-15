@@ -25,7 +25,7 @@ mod tests {
             if col.column_type == data_type_string::CHAR
                 || col.column_type == data_type_string::VARCHAR
             {
-                print!("{} {} {} \n", col_name, col_type, col.get_size())
+                print!("{} {}  \n", col_name, col_type)
             } else {
                 print!("{} {} \n", col_name, col_type)
             }
@@ -38,7 +38,6 @@ mod tests {
             .add_varchar("Address", 50)
             .add_char("Name", 15)
             .add_varchar("moms_address", 50)
-            .set_null()
             .build();
 
         let idx = schema.get_col_idx("moms_address").unwrap();
@@ -47,11 +46,6 @@ mod tests {
         assert_eq!(
             schema.columns.get(idx as usize).expect(msg).column_name,
             "moms_address"
-        );
-
-        assert_eq!(
-            *schema.columns.get(idx as usize).expect(msg).get_size(),
-            50 as u8
         );
     }
 
@@ -66,7 +60,6 @@ mod tests {
             .add_decimal("price")
             .add_varchar("description3", 255)
             .add_boolean("available")
-            .set_null()
             .build();
 
         assert_eq!(schema.length, 7);
@@ -81,13 +74,10 @@ mod tests {
 
     #[test]
     fn test_column_properties() {
-        let column = Column::new("id", data_type_string::INT, 0);
+        let column = Column::new("id", data_type_string::INT);
 
         assert_eq!(column.column_name, "id");
         assert_eq!(column.column_type, data_type_string::INT);
-        assert_eq!(column.is_fixed_length, true);
-        assert_eq!(column.is_numeric_type, true);
-        assert_eq!(column.offset_position_in_tuple, 0);
     }
 
     #[test]

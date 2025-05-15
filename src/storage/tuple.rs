@@ -36,16 +36,16 @@ pub mod header_const {
 
 pub fn schema_reorder(input_values: &mut Vec<SchemaDataValue>, schema: &Schema) {
     let len = schema.length;
-    let mut map: HashMap<&str, SchemaDataValue> = HashMap::with_capacity(len);
+    let mut map: HashMap<String, SchemaDataValue> = HashMap::with_capacity(len);
 
     for schema_val in input_values.drain(0..len) {
-        map.insert(schema_val.column_name, schema_val);
+        map.insert(schema_val.column_name.to_string(), schema_val);
     }
 
     assert_eq!(input_values.len(), 0 as usize);
 
     for column_ in schema.get_columns() {
-        let val = map.remove(column_.column_name).expect("No such key exists");
+        let val = map.remove(&column_.column_name.to_string()).expect("No such key exists");
         input_values.push(val);
     }
 }
