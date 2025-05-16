@@ -1,13 +1,12 @@
 #![allow(unused_variables)] // TODO(you): remove this lint after implementing this mod
 #![allow(dead_code)] // TODO(you): remove this lint after implementing this mod
 
-use crate::index::tree::{
-    byte_box::ByteBox,
-    index_types::NodeKey,
+use crate::index::tree::{byte_box::ByteBox, index_types::NodeKey};
 
+use super::{
+    node_type::{NodeType, PagePointer},
+    tree_node_inner::{GuidePostNode, NodeInner},
 };
-
-use super::{node_type::{NodeType, PagePointer}, tree_node_inner::{GuidePostNode, NodeInner}};
 
 impl GuidePostNode {
     /// Removes a key from an internal node
@@ -22,7 +21,7 @@ impl GuidePostNode {
         let node_type = self.node_type.clone();
         match self.node_type {
             NodeType::Internal(ref mut children, ref mut keys, _) => {
-                let idx = NodeInner::binary_search_in_key(&node_type, &search, &keys)?;
+                let idx = NodeInner::binary_search_in_key(&search, &keys)?;
                 children.remove(idx);
                 Ok(())
             }
@@ -38,7 +37,7 @@ impl GuidePostNode {
         let node_type = self.node_type.clone();
         match self.node_type {
             NodeType::Internal(_, ref mut keys, _) => {
-                let idx = NodeInner::binary_search_in_key(&node_type, &key, &keys)?;
+                let idx = NodeInner::binary_search_in_key(&key, &keys)?;
 
                 keys.insert(idx, key);
                 Ok(())
@@ -134,7 +133,7 @@ impl GuidePostNode {
         let node_type = self.node_type.clone();
         match self.node_type {
             NodeType::Internal(_, ref keys, _) => {
-                let idx = NodeInner::find_key(node_type, search, &keys)?;
+                let idx = NodeInner::find_key(search, &keys)?;
 
                 if let NodeKey::GuidePost(k) = NodeInner::get_key_at_index(idx, &keys)? {
                     return Ok(k);
@@ -150,7 +149,7 @@ impl GuidePostNode {
         let node_type = self.node_type.clone();
         match self.node_type {
             NodeType::Internal(_, ref keys, _) => {
-                let idx = NodeInner::find_key(node_type, search, &keys);
+                let idx = NodeInner::find_key(search, &keys);
 
                 return idx;
             }

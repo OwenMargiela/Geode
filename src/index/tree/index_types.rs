@@ -3,13 +3,13 @@
 
 use super::byte_box::ByteBox;
 
-#[derive(PartialEq, Eq, Clone, Debug)]
+#[derive(PartialEq, Eq, Clone, Debug,PartialOrd, Ord)]
 pub struct KeyValuePair {
     pub(crate) key: ByteBox,
     pub(crate) value: ByteBox,
 }
 
-#[derive(PartialEq, Eq, Clone, Debug)]
+#[derive(PartialEq, Eq, Clone, Debug,PartialOrd, Ord)]
 pub enum NodeKey {
     GuidePost(ByteBox),
     KeyValuePair(KeyValuePair),

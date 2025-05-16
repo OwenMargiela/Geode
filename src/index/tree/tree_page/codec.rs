@@ -5,10 +5,13 @@ use bytes::{Buf, BufMut};
 
 use crate::{
     index::tree::{
-        byte_box::DataType, index_types::{KeyValuePair, NodeKey}, tree_node::{node_type::NodeType, tree_node_inner::NodeInner}, tree_page::tree_page_layout::{
+        byte_box::DataType,
+        index_types::{KeyValuePair, NodeKey},
+        tree_node::{node_type::NodeType, tree_node_inner::NodeInner},
+        tree_page::tree_page_layout::{
             FromByte, InternalNodeHeader, LeafNodeHeader, NodeHeader, INTERNAL_NODE_HEADER_SIZE,
             PAGE_SIZE,
-        }
+        },
     },
     storage::page::btree_page_layout::ToByte,
 };
@@ -65,6 +68,7 @@ impl Codec {
                     pointer,
 
                     next_pointer: None,
+                    is_leaf: false,
                 });
             }
             NodeType::Leaf(ref mut entries, _, _) => {
@@ -112,6 +116,7 @@ impl Codec {
                     pointer,
 
                     next_pointer: Some(next_pointer),
+                    is_leaf: true,
                 });
             }
             NodeType::Unexpected => {

@@ -1,10 +1,10 @@
 #![allow(unused_variables)] // TODO(you): remove this lint after implementing this mod
 #![allow(dead_code)] // TODO(you): remove this lint after implementing this mod
 
-use crate::index::{ tree::{
+use crate::index::tree::{
     byte_box::ByteBox,
     index_types::{KeyValuePair, NodeKey},
-}};
+};
 
 use super::node_type::{NodeType, PagePointer};
 
@@ -14,6 +14,7 @@ pub struct NodeInner {
     pub is_root: bool,
     pub pointer: PagePointer,
     pub next_pointer: Option<PagePointer>,
+    pub is_leaf: bool,
 }
 
 pub type KvNode = NodeInner;
@@ -26,10 +27,34 @@ pub enum Node {
 pub struct PopResult {
     pub(crate) pop_key: NodeKey,
     pub(crate) promotion_key: NodeKey,
-    pub(crate) right_sibling_pinter: Option<PagePointer>,
+    pub(crate) child_pointer: Option<PagePointer>,
 }
 
 impl NodeInner {
+    pub fn new(
+        node_type: NodeType,
+        is_root: bool,
+        pointer: PagePointer,
+        next_pointer: Option<PagePointer>,
+    ) -> NodeInner {
+        match node_type {
+            NodeType::Internal(_, _, _) => NodeInner {
+                node_type,
+                is_root,
+                pointer,
+                next_pointer,
+                is_leaf: false,
+            },
+            _ => NodeInner {
+                node_type,
+                is_root,
+                pointer,
+                next_pointer,
+                is_leaf: true,
+            },
+        }
+    }
+
     pub fn pop_front(&mut self) -> anyhow::Result<PopResult> {
         match &self.node_type {
             NodeType::Internal(_, keys, _) => {
@@ -44,7 +69,7 @@ impl NodeInner {
                 let res = PopResult {
                     pop_key: NodeKey::GuidePost(key_box),
                     promotion_key: NodeKey::GuidePost(promotion_key),
-                    right_sibling_pinter: Some(page_id),
+                    child_pointer: Some(page_id),
                 };
 
                 Ok(res)
@@ -66,7 +91,7 @@ impl NodeInner {
                 Ok(PopResult {
                     pop_key: NodeKey::KeyValuePair(kv_pair),
                     promotion_key: NodeKey::GuidePost(promotion_key),
-                    right_sibling_pinter: None,
+                    child_pointer: None,
                 })
             }
             NodeType::Unexpected => {
@@ -89,7 +114,7 @@ impl NodeInner {
                 Ok(PopResult {
                     pop_key: NodeKey::GuidePost(key),
                     promotion_key: NodeKey::GuidePost(promotion_key),
-                    right_sibling_pinter: Some(page_id),
+                    child_pointer: Some(page_id),
                 })
             }
             NodeType::Leaf(ref mut entries, _, _) => {
@@ -109,7 +134,7 @@ impl NodeInner {
                 Ok(PopResult {
                     pop_key: NodeKey::KeyValuePair(kv_pair),
                     promotion_key: NodeKey::GuidePost(promotion_key),
-                    right_sibling_pinter: None,
+                    child_pointer: None,
                 })
             }
             NodeType::Unexpected => {
@@ -117,33 +142,31 @@ impl NodeInner {
             }
         }
     }
+
+    pub fn get_key_array_length(&self) -> usize {
+        match &self.node_type {
+            NodeType::Internal(_, keys, _) => keys.len(),
+            NodeType::Leaf(entries, _, _) => entries.len(),
+
+            NodeType::Unexpected => 0,
+        }
+    }
 }
 
 // Node helper functions
 impl NodeInner {
-    pub fn binary_search_in_key(
-        node_type: &NodeType,
-        node_key: &NodeKey,
-        vec: &Vec<NodeKey>,
-    ) -> anyhow::Result<usize> {
+    pub fn binary_search_in_key(node_key: &NodeKey, vec: &Vec<NodeKey>) -> anyhow::Result<usize> {
         let (search_key, _) = NodeInner::deconstruct_value(&node_key);
 
-        match node_type {
-            NodeType::Unexpected => {
-                return Err(anyhow::Error::msg("Unexpected Error"));
-            }
-            _ => {
-                let idx = vec
-                    .binary_search_by(|key| {
-                        let (key_data, _) = NodeInner::deconstruct_value(&key);
+        let idx = vec
+            .binary_search_by(|key| {
+                let (key_data, _) = NodeInner::deconstruct_value(&key);
 
-                        key_data.cmp(&search_key)
-                    })
-                    .unwrap();
+                key_data.cmp(&search_key)
+            })
+            .unwrap();
 
-                Ok(idx)
-            }
-        }
+        Ok(idx)
     }
 
     /// Returns a key and optional value
@@ -154,14 +177,10 @@ impl NodeInner {
         }
     }
 
-    pub fn find_key(
-        node_type: NodeType,
-        search: NodeKey,
-        vec: &Vec<NodeKey>,
-    ) -> Result<usize, anyhow::Error> {
+    pub fn find_key(search: NodeKey, vec: &Vec<NodeKey>) -> Result<usize, anyhow::Error> {
         let (search_data, _) = NodeInner::deconstruct_value(&search);
 
-        let res = NodeInner::binary_search_in_key(&node_type, &search, &vec);
+        let res = NodeInner::binary_search_in_key(&search, &vec);
 
         res
     }
@@ -171,13 +190,34 @@ impl NodeInner {
     }
 
     pub fn find_and_update_key(
-        node_type: &NodeType,
         search_key: NodeKey,
         update_key: NodeKey,
         vec: &mut Vec<NodeKey>,
     ) -> anyhow::Result<()> {
-        let idx = NodeInner::find_key(node_type.clone(), search_key, vec)?;
+        let idx = NodeInner::find_key(search_key, vec)?;
         vec[idx] = update_key;
         Ok(())
+    }
+
+    /// Returns key_value array for leaf nodes and guide post keys for internal nodes
+    pub fn get_key_vec(node_type: &NodeType) -> anyhow::Result<&Vec<NodeKey>> {
+        let vec = match node_type {
+            NodeType::Internal(_, keys, _) => keys,
+            NodeType::Leaf(pairs, _, _) => pairs,
+
+            NodeType::Unexpected => {
+                return Err(anyhow::Error::msg("Unexpected Error"));
+            }
+        };
+
+        return Ok(vec);
+    }
+    /// Returns a mutable reference to key_value array for leaf nodes and guide post keys for internal nodes
+    pub fn get_key_vec_mut(node_type: &mut NodeType) -> anyhow::Result<&mut Vec<NodeKey>> {
+        match node_type {
+            NodeType::Internal(_, ref mut keys, _) => Ok(keys),
+            NodeType::Leaf(ref mut pairs, _, _) => Ok(pairs), // if this is Vec<NodeKey> too
+            NodeType::Unexpected => Err(anyhow::Error::msg("Unexpected Error")),
+        }
     }
 }

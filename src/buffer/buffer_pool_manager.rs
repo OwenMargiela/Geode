@@ -4,7 +4,7 @@
 use std::{
     collections::HashMap,
     sync::{
-        atomic::{AtomicBool, AtomicU32, Ordering},
+        atomic::{ AtomicU32, Ordering},
         Arc, Mutex, RwLock,
     },
 };
@@ -35,8 +35,7 @@ pub type FileId = u64;
 pub struct FrameHeader {
     pub frame_id: FrameId,
     pub pin_count: AtomicU32,
-    pub writing_to: AtomicBool,
-    pub is_dirty: AtomicBool,
+
     pub page_id: PageId,
     pub file_id: FileId,
 
@@ -372,8 +371,7 @@ impl BufferPoolManager {
         let frame = FrameHeader {
             data: frame_data,
             frame_id,
-            writing_to: AtomicBool::new(false),
-            is_dirty: AtomicBool::new(false), // I forgot what dirty means. It means data on disk is not consistent with data in memory >_O
+
             pin_count: AtomicU32::new(0),
             file_id,
             page_id,
@@ -390,8 +388,6 @@ impl BufferPoolManager {
 
         frame_guard.insert(frame_id, Some(RwLock::new(frame)));
         drop(frame_guard);
-
-      
     }
 
     pub(self) fn create_guard(&self, frame_id: FrameId, access_type: Protocol) -> PageGuard {
@@ -413,13 +409,9 @@ impl BufferPoolManager {
     }
 
     pub(crate) fn write_page(&self, file_id: u64, page_id: PageId) -> WriteGuard {
-     
-
         let guard = self
             .check_write_page(file_id, page_id)
             .expect("Write lock error");
-
-
 
         guard
     }

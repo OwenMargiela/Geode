@@ -4,10 +4,12 @@
 use crate::index::tree::{
     byte_box::ByteBox,
     index_types::{KeyValuePair, NodeKey},
-   
 };
 
-use super::{node_type::NodeType, tree_node_inner::{KvNode, NodeInner}};
+use super::{
+    node_type::NodeType,
+    tree_node_inner::{KvNode, NodeInner},
+};
 
 impl KvNode {
     /// Inserts a key value pair entry into a leaf node
@@ -93,7 +95,7 @@ impl KvNode {
         let node_type = self.node_type.clone();
         match self.node_type {
             NodeType::Leaf(ref entries, _, _) => {
-                let idx = NodeInner::find_key(node_type, search, entries)?;
+                let idx = NodeInner::find_key(search, entries)?;
 
                 if let NodeKey::KeyValuePair(kv) = NodeInner::get_key_at_index(idx, &entries)? {
                     return Ok(kv);
@@ -109,7 +111,7 @@ impl KvNode {
         let node_type = self.node_type.clone();
         match self.node_type {
             NodeType::Leaf(ref entries, _, _) => {
-                let idx = NodeInner::find_key(node_type, search, entries);
+                let idx = NodeInner::find_key(search, entries);
                 return idx;
             }
             _ => {}

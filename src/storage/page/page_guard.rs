@@ -6,7 +6,9 @@ use std::sync::{atomic::Ordering, Arc, Mutex, RwLock, RwLockReadGuard, RwLockWri
 use hashlink::LinkedHashMap;
 
 use crate::{
-    buffer::buffer_pool_manager::{FrameHeader, FrameId}, index::btree::Protocol, utils::replacer::{LRUKReplacer, Replacer}
+    buffer::buffer_pool_manager::{FrameHeader, FrameId},
+    index::btree::Protocol,
+    utils::replacer::{LRUKReplacer, Replacer},
 };
 
 pub enum PageGuard<'a> {
@@ -30,11 +32,27 @@ impl<'a> PageGuard<'a> {
             None
         }
     }
+
+    pub fn into_read_guard_ref(&self) -> Option<&ReadGuard<'a>> {
+        if let PageGuard::ReadGuard(guard) = self {
+            Some(&guard)
+        } else {
+            None
+        }
+    }
+
+      pub fn into_write_guard_ref(&self) -> Option<&WriteGuard<'a>> {
+        if let PageGuard::WriteGuard(guard) = self {
+            Some(&guard)
+        } else {
+            None
+        }
+    }
 }
 
 pub struct FrameGuard<'a> {
     frame_id: u32,
-    guard: RwLockReadGuard<'a, LinkedHashMap<u32, Option<RwLock<FrameHeader>>>>,
+    map_guard: Arc<RwLockReadGuard<'a, LinkedHashMap<u32, Option<RwLock<FrameHeader>>>>>,
     on_drop: Box<dyn Fn(u32, bool) + 'a>,
     is_valid: bool,
 }
@@ -43,11 +61,15 @@ impl<'a> FrameGuard<'a> {
     pub fn new(
         frame_id: u32,
         replacer: Arc<Mutex<LRUKReplacer<u32>>>,
-        guard: RwLockReadGuard<'a, LinkedHashMap<u32, Option<RwLock<FrameHeader>>>>,
+        map_guard: RwLockReadGuard<'a, LinkedHashMap<u32, Option<RwLock<FrameHeader>>>>,
         access_type: Protocol,
     ) -> PageGuard<'a> {
         {
-            let frame_guard = guard.get(&frame_id).unwrap().as_ref().expect("Valid frame");
+            let frame_guard = map_guard
+                .get(&frame_id)
+                .unwrap()
+                .as_ref()
+                .expect("Valid frame");
             let frame = frame_guard.write().unwrap();
             frame.pin_count.fetch_add(1, Ordering::Relaxed);
         }
@@ -65,7 +87,7 @@ impl<'a> FrameGuard<'a> {
 
         let frame = FrameGuard {
             frame_id,
-            guard,
+            map_guard: Arc::new(map_guard),
             is_valid: false,
             on_drop,
         };
@@ -80,19 +102,16 @@ impl<'a> FrameGuard<'a> {
 impl<'a> Drop for FrameGuard<'a> {
     fn drop(&mut self) {
         let frame_guard = self
-            .guard
+            .map_guard
             .get(&self.frame_id)
             .unwrap()
             .as_ref()
             .expect("Valid frame");
 
-        let mut frame = frame_guard.write().unwrap();
+        let frame = frame_guard.write().unwrap();
         frame.pin_count.fetch_sub(1, Ordering::Release);
-        frame.is_dirty = false.into();
 
         (self.on_drop)(self.frame_id, true);
-
-        // println!("Dropping {}", self.frame_id);
     }
 }
 
@@ -111,7 +130,7 @@ impl<'a> WriteGuard<'a> {
     pub fn get_frame(&self) -> RwLockWriteGuard<'_, FrameHeader> {
         let frame_guard = self
             ._frame
-            .guard
+            .map_guard
             .get(&self._frame_id)
             .unwrap()
             .as_ref()
@@ -137,7 +156,7 @@ impl<'a> ReadGuard<'a> {
     pub fn get_frame(&self) -> RwLockReadGuard<'_, FrameHeader> {
         let frame_guard = self
             ._frame
-            .guard
+            .map_guard
             .get(&self._frame_id)
             .unwrap()
             .as_ref()
