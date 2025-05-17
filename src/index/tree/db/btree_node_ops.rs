@@ -70,9 +70,13 @@ impl NodeInner {
     }
 
     /// Is this page sufficient large enough to borrow from
-
+    ///
     pub fn can_borrow(&self, b_param: usize) -> bool {
         return self.get_key_array_length() >= b_param;
+
+        // Future implementations will have the following predicate
+
+        // return self.get_key_array_length() >= Page::GetMinCapacity;
     }
 
     pub fn borrow(

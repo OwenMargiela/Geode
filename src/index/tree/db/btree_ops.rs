@@ -10,7 +10,7 @@ use crate::index::tree::{
 
 use super::btree_obj::BPTree;
 
-impl<'a> BPTree<'a> {
+impl BPTree {
     pub fn get(&self, key: ByteBox) -> anyhow::Result<KeyValuePair> {
         let search_key = NodeKey::GuidePost(key);
         unimplemented!()

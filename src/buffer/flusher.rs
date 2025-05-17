@@ -5,15 +5,17 @@ use std::{
     collections::VecDeque,
     sync::{
         atomic::{AtomicU32, Ordering},
-        Arc,
+        Arc, RwLock,
     },
 };
 
 use anyhow::Ok;
-use crossbeam_queue::SegQueue;
+
 use dashmap::DashMap;
 
-use crate::storage::page::{btree_page_layout::PAGE_SIZE, page_guard::PageGuard};
+use crate::{
+    index::tree::tree_node::node_type::PagePointer, storage::page::btree_page_layout::PAGE_SIZE,
+};
 
 use super::buffer_pool_manager::BufferPoolManager;
 
@@ -29,6 +31,7 @@ struct LockData {
     ticker: AtomicU32,
     txn_num: u32,
     txn_status: Status,
+    page_id: u32,
 }
 
 #[derive(Debug)]
@@ -37,24 +40,36 @@ pub enum Lock {
     SHLOCK,
 }
 
-pub struct Context<'a> {
-    stack: SegQueue<PageGuard<'a>>,
-    context_type: Lock,
+pub struct Context {
+    stack: Arc<RwLock<VecDeque<PagePointer>>>,
+    context_type: Option<Lock>,
 }
 
-pub struct Flusher<'a> {
-    inner: Arc<BufferPoolManager>,
+pub struct Flusher {
+    pub(self) inner: Arc<BufferPoolManager>,
     file: u64,
 
-    lock_table: DashMap<u32, LockData>,
-    guard_table: DashMap<u32, PageGuard<'a>>,
+    pub(self) lock_table: DashMap<u32, LockData>,
 
-    txn_ticker: AtomicU32,
+    pub(self) txn_ticker: AtomicU32,
 
-    context: Context<'a>,
+    pub(self) context: Context,
 }
 
-impl<'a> Flusher<'a> {
+impl Flusher {
+    pub fn new(bpm: Arc<BufferPoolManager>, file: u64) -> Self {
+        Self {
+            inner: bpm,
+            file,
+            lock_table: DashMap::new(),
+
+            txn_ticker: AtomicU32::new(0),
+            context: Context {
+                stack: Arc::new(RwLock::new(VecDeque::new())),
+                context_type: None,
+            },
+        }
+    }
     pub fn new_page(&self) -> u32 {
         self.inner.new_page(self.file)
     }
@@ -63,9 +78,10 @@ impl<'a> Flusher<'a> {
         self.inner.allocate_file()
     }
 
-    pub fn aqquire_ex(&'a self, page_id: u32) -> anyhow::Result<()> {
+    pub fn aqquire_ex(&self, page_id: u32) -> anyhow::Result<()> {
         if let Some(lock_data) = self.lock_table.get(&page_id) {
             if let Lock::EXLOCK = lock_data.guard {
+                dbg!("");
                 self.log_transaction(page_id);
                 return Err(anyhow::Error::msg("EX lock has already been granted"));
             }
@@ -83,18 +99,17 @@ impl<'a> Flusher<'a> {
                     .fetch_add(1, std::sync::atomic::Ordering::SeqCst),
                 ticker: AtomicU32::new(1),
                 txn_status: Status::Running,
+                page_id,
             },
         );
-
-        self.guard_table
-            .insert(page_id, PageGuard::WriteGuard(guard));
 
         Ok(())
     }
 
-    pub fn aqquire_sh(&self, page_id: u32) -> anyhow::Result<()> {
+    pub(self) fn aqquire_sh(&self, page_id: u32) -> anyhow::Result<()> {
         if let Some(lock_data) = self.lock_table.get(&page_id) {
             if let Lock::EXLOCK = lock_data.guard {
+                dbg!("");
                 self.log_transaction(page_id);
                 return Err(anyhow::Error::msg("EX lock has already been granted"));
             }
@@ -111,6 +126,7 @@ impl<'a> Flusher<'a> {
                     lock.ticker.fetch_add(1, Ordering::SeqCst);
                 }
                 _ => {
+                    dbg!("");
                     self.log_transaction(page_id);
                     return Err(anyhow::Error::msg("EX lock has already been granted"));
                 }
@@ -125,29 +141,20 @@ impl<'a> Flusher<'a> {
                         .fetch_add(1, std::sync::atomic::Ordering::SeqCst),
                     ticker: AtomicU32::new(1),
                     txn_status: Status::Running,
+                    page_id,
                 },
             );
         }
 
         Ok(())
-
-      
     }
 
-    pub fn aqquire_context_ex(&'a self, mut page_id_stack: VecDeque<u32>) -> anyhow::Result<()> {
+    pub fn aqquire_context_ex(&self, mut page_id_stack: VecDeque<u32>) -> anyhow::Result<()> {
         loop {
             if let Some(page_id) = page_id_stack.pop_front() {
-                if let Some(lock_data) = self.lock_table.get(&page_id) {
-                    if let Lock::EXLOCK = lock_data.guard {
-                        self.log_transaction(page_id);
-                        return Err(anyhow::Error::msg("EX lock has already been granted"));
-                    }
-                    self.lock_table.remove(&page_id).unwrap();
-                }
+                self.aqquire_ex(page_id).unwrap();
 
-                let guard = self.inner.write_page(self.file, page_id);
-
-                self.context.stack.push(PageGuard::WriteGuard(guard));
+                self.context.stack.try_write().unwrap().push_back(page_id);
             } else {
                 break;
             }
@@ -156,10 +163,20 @@ impl<'a> Flusher<'a> {
         Ok(())
     }
 
-    pub fn read(&self, page_id: u32) -> anyhow::Result<[u8; PAGE_SIZE]> {
+    // Lazy gaurd eviction?
+    pub fn read_drop(&self, page_id: u32) -> [u8; PAGE_SIZE] {
+        self.aqquire_sh(page_id).unwrap();
+        let page = self.read(page_id).unwrap();
+        self.lock_table.remove(&page_id).unwrap();
+
+        page
+    }
+
+    pub(self) fn read(&self, page_id: u32) -> anyhow::Result<[u8; PAGE_SIZE]> {
         if let Some(lock) = self.lock_table.get(&page_id) {
             match lock.guard {
                 Lock::EXLOCK => {
+                    dbg!("");
                     self.log_transaction(page_id);
                     return Err(anyhow::Error::msg(
                         "Incompatible Locks.Expected Shlock found Exlock",
@@ -167,14 +184,11 @@ impl<'a> Flusher<'a> {
                 }
 
                 _ => {
-                    let guard = self.guard_table.get(&page_id);
+                    let guard = self.inner.read_page(self.file, page_id);
+                    let data = guard.get_frame().data;
 
-                    if guard.is_some() {
-                        let guard = guard.unwrap();
-                        let read_guard = guard.into_read_guard_ref().unwrap();
-                        let data = read_guard.get_frame().data;
-                        return Ok(data);
-                    }
+                    drop(guard);
+                    return Ok(data);
                 }
             }
         }
@@ -182,10 +196,11 @@ impl<'a> Flusher<'a> {
         return Err(anyhow::Error::msg("Guard does not exists"));
     }
 
-    pub fn write_all(&self, page_id: u32, data: [u8; PAGE_SIZE]) -> anyhow::Result<()> {
+    pub(self) fn write_all(&self, page_id: u32, data: [u8; PAGE_SIZE]) -> anyhow::Result<()> {
         if let Some(lock) = self.lock_table.get(&page_id) {
             match lock.guard {
                 Lock::SHLOCK => {
+                    dbg!("");
                     self.log_transaction(page_id);
                     return Err(anyhow::Error::msg(
                         "Incompatible Locks.Expected Exlock found Shlock",
@@ -193,13 +208,9 @@ impl<'a> Flusher<'a> {
                 }
 
                 _ => {
-                    let (_, guard) = self.guard_table.remove(&page_id).unwrap();
+                    let guard = self.inner.write_page(self.file, page_id);
 
-                    self.lock_table.remove(&page_id).unwrap();
-
-                    let guard = guard.into_write_guard().unwrap();
                     guard.get_frame().data.copy_from_slice(&data);
-
                     drop(guard);
 
                     return Ok(());
@@ -213,22 +224,62 @@ impl<'a> Flusher<'a> {
     pub fn pop_flush(&self, data: [u8; PAGE_SIZE], page_id: u32) -> anyhow::Result<()> {
         let context = &self.context;
 
-        if context.stack.len() > 0 {
-            let guard = context.stack.pop().unwrap();
+        if context.stack.try_read().unwrap().len() > 0 {
+            let id = context.stack.try_write().unwrap().pop_front().unwrap();
 
-            self.lock_table.remove(&page_id).unwrap();
-
-            let guard = guard.into_write_guard().unwrap();
-            guard.get_frame().data.copy_from_slice(&data);
-
-            drop(guard);
+            self.write_all(page_id, data)?;
         }
-        unimplemented!()
+
+        self.lock_table.remove(&page_id).unwrap();
+        Ok(())
+    }
+
+    pub fn pop_flush_test(&self, data: [u8; PAGE_SIZE]) -> anyhow::Result<()> {
+        let context = &self.context;
+
+        let id: u32;
+        if context.stack.try_read().unwrap().len() > 0 {
+            id = context.stack.try_write().unwrap().pop_front().unwrap();
+
+            self.write_all(id, data)?;
+            self.lock_table.remove(&id).unwrap();
+        }
+
+        Ok(())
+    }
+
+    // Transaction ticket to coordinate who can and cant read top?
+    pub fn read_top(&self) -> anyhow::Result<[u8; PAGE_SIZE]> {
+        let context = &self.context;
+        let stack = context.stack.try_read().unwrap();
+        if stack.len() > 0 {
+            let data = stack.front().unwrap();
+
+            let gaurd = self.inner.read_page(self.file, data.clone());
+            let data = gaurd.get_frame().data;
+            drop(gaurd);
+
+            return Ok(data);
+        }
+
+        return Err(anyhow::Error::msg("Invalid stack len"));
+    }
+
+    pub fn write_flush(&self, data: [u8; PAGE_SIZE], page_id: u32) -> anyhow::Result<()> {
+        self.aqquire_ex(page_id)?;
+        self.write_all(page_id, data)?;
+
+        self.lock_table.remove(&page_id).unwrap();
+        Ok(())
     }
 
     pub fn log_transaction(&self, page_id: u32) {
         let txn = self.lock_table.get(&page_id).unwrap();
 
-        dbg!(txn);
+        dbg!(&txn.page_id);
+        dbg!(&txn.txn_status);
+        dbg!(&txn.txn_num);
+        dbg!(&txn.ticker);
+        dbg!(&txn.guard,);
     }
 }

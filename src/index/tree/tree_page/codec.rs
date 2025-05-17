@@ -128,6 +128,7 @@ impl Codec {
     pub fn encode(node: &NodeInner) -> anyhow::Result<TreePage> {
         let is_root = node.is_root;
         let pointer = node.pointer;
+        let next = node.next_pointer;
 
         let mut raw: Vec<u8> = Vec::with_capacity(PAGE_SIZE);
 
@@ -180,7 +181,7 @@ impl Codec {
                 return Ok(TreePage::new(raw.try_into().unwrap()));
             }
 
-            NodeType::Leaf(ref entries, _, ref next) => {
+            NodeType::Leaf(ref entries, _, _) => {
                 // Header
                 let mut start = LeafNodeHeader::NumPairs.offset();
                 let mut end = start + LeafNodeHeader::NumPairs.size();

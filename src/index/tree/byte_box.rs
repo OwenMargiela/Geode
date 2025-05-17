@@ -9,6 +9,7 @@ use std::{cmp::Ordering, fmt};
 pub struct ByteBox {
     pub data: Bytes,
     pub datatype: DataType,
+
     pub data_size: usize,
     pub data_length: u8,
 }

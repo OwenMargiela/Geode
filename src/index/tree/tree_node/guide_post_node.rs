@@ -87,11 +87,22 @@ impl GuidePostNode {
         }
     }
 
+    pub fn remove_sibling_node(&mut self, key: NodeKey, child: PagePointer) -> anyhow::Result<()> {
+        match self.node_type {
+            NodeType::Internal(_, _, _) => {
+                self.remove_child_pointer(child)?;
+                self.remove_key(key)?;
+
+                Ok(())
+            }
+            _ => Err(anyhow::Error::msg("Unexpected Error")),
+        }
+    }
     /// Removes a key from an internal node
     pub fn remove_child_pointer(&mut self, child: PagePointer) -> anyhow::Result<()> {
         let node_type = self.node_type.clone();
         match self.node_type {
-            NodeType::Internal(ref mut children, ref mut keys, _) => {
+            NodeType::Internal(ref mut children, _, _) => {
                 let idx = children.binary_search(&child).unwrap_or_else(|x| x);
                 children.remove(idx);
                 Ok(())

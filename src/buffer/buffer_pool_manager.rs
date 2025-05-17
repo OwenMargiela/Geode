@@ -4,7 +4,7 @@
 use std::{
     collections::HashMap,
     sync::{
-        atomic::{ AtomicU32, Ordering},
+        atomic::{AtomicU32, Ordering},
         Arc, Mutex, RwLock,
     },
 };

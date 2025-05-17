@@ -3,6 +3,8 @@
 
 use std::{cell::RefCell, collections::VecDeque, sync::Arc};
 
+use anyhow::Ok;
+
 use crate::{
     buffer::{
         buffer_pool_manager::{BufferPoolManager, FileId},
@@ -14,7 +16,7 @@ use crate::{
             node_type::{NodeType, PagePointer},
             tree_node_inner::NodeInner,
         },
-        tree_page::{codec::Codec, page::TreePage},
+        tree_page::{codec::Codec, page::TreePage, tree_page_layout::PAGE_SIZE},
     },
 };
 
@@ -23,8 +25,8 @@ pub enum WriteOperation {
     Insert,
 }
 
-pub struct BPTree<'a> {
-    flusher: Flusher<'a>,
+pub struct BPTree {
+    flusher: Flusher,
     root_page_id: RefCell<PagePointer>,
 
     pub index_id: FileId,
@@ -60,7 +62,7 @@ impl BTreeBuilder {
     }
 }
 
-impl<'a> BPTree<'a> {
+impl BPTree {
     pub(crate) fn new_root(&self, key: NodeKey, left_child: PagePointer, right_child: PagePointer) {
         let new_root_pointer = self.flusher.new_page();
         let new_root = NodeInner::new(
@@ -76,34 +78,319 @@ impl<'a> BPTree<'a> {
         let page = Codec::encode(&new_root).unwrap();
 
         self.flusher
-            .write_all(new_root_pointer, page.get_data())
+            .write_flush(page.get_data(), new_root_pointer)
             .unwrap();
 
         unimplemented!()
     }
 
     pub fn search(&self, search: NodeKey) -> anyhow::Result<KeyValuePair> {
-        unimplemented!()
+        let page = self.flusher.read_drop(*self.root_page_id.borrow());
+
+        let parent = self.codec.decode(&TreePage::new(page)).unwrap();
+
+        if let NodeType::Leaf(entires, _, _) = parent.node_type {
+            let index = NodeInner::find_key(search, &entires)?;
+
+            let node_key = entires.get(index).unwrap();
+
+            let (key_bytes, value) = NodeInner::deconstruct_value(node_key);
+
+            return Ok(KeyValuePair {
+                key: key_bytes,
+                value: value.unwrap(),
+            });
+        }
+
+        let kv_pair: Option<KeyValuePair>;
+        let mut current_node = parent;
+        loop {
+            match &current_node.node_type {
+                NodeType::Internal(ref children, ref keys, _) => {
+                    let idx = keys.binary_search(&search).unwrap_or_else(|x| x);
+
+                    if idx >= keys.len() || keys[idx] != search {
+                        let child_pointer = children.get(idx).unwrap().clone();
+
+                        let page = &TreePage::new(self.flusher.read_drop(child_pointer));
+
+                        current_node = self.codec.decode(page).unwrap();
+                    } else {
+                        let page = &TreePage::new(
+                            self.flusher
+                                .read_drop(children.get(idx + 1).unwrap().clone()),
+                        );
+                        current_node = self.codec.decode(page).unwrap();
+                    }
+                }
+                NodeType::Leaf(entries, _, _) => {
+                    let index = NodeInner::find_key(search, &entries)?;
+
+                    let node_key = entries.get(index).unwrap();
+
+                    let (key_bytes, value) = NodeInner::deconstruct_value(node_key);
+
+                    kv_pair = Some(KeyValuePair {
+                        key: key_bytes,
+                        value: value.unwrap(),
+                    });
+
+                    break;
+                }
+                _ => {
+                    kv_pair = None;
+                    break;
+                }
+            }
+        }
+        return Ok(kv_pair.unwrap());
     }
 
     pub fn find_min(&self) -> anyhow::Result<NodeInner> {
+        let mut page = self.flusher.read_drop(*self.root_page_id.borrow());
+
+        let parent = self.codec.decode(&TreePage::new(page)).unwrap();
+
+        if let NodeType::Leaf(ref entries, _, _) = parent.node_type {
+            return Ok(parent);
+        }
+
+        let mut current_node = parent;
+        loop {
+            match &current_node.node_type {
+                NodeType::Internal(ref children, ref keys, _) => {
+                    let child_pointer = children.get(0).unwrap().clone();
+
+                    page = self.flusher.read_drop(child_pointer);
+
+                    current_node = self.codec.decode(&TreePage::new(page)).unwrap();
+                }
+                NodeType::Leaf(_, _, _) => {
+                    return Ok(current_node);
+                }
+                _ => {
+                    return Err(anyhow::Error::msg("Unexpected error"));
+                }
+            }
+        }
         unimplemented!()
     }
 
-    pub fn find_node(&self) -> anyhow::Result<NodeInner> {
-        unimplemented!()
+    pub fn find_node(&self, search: NodeKey) -> anyhow::Result<NodeInner> {
+        let page = self.flusher.read_drop(*self.root_page_id.borrow());
+
+        let parent = self.codec.decode(&TreePage::new(page)).unwrap();
+
+        if let NodeType::Leaf(ref entires, _, _) = parent.node_type {
+            let index = NodeInner::find_key(search, &entires)?;
+
+            let node_key = entires.get(index).unwrap();
+
+            let (key_bytes, value) = NodeInner::deconstruct_value(node_key);
+
+            return Ok(parent);
+        }
+
+        let kv_pair: Option<KeyValuePair>;
+        let mut current_node = parent;
+        loop {
+            match &current_node.node_type {
+                NodeType::Internal(ref children, ref keys, _) => {
+                    let idx = keys.binary_search(&search).unwrap_or_else(|x| x);
+
+                    if idx >= keys.len() || keys[idx] != search {
+                        let child_pointer = children.get(idx).unwrap().clone();
+
+                        let page = &TreePage::new(self.flusher.read_drop(child_pointer));
+
+                        current_node = self.codec.decode(page).unwrap();
+                    } else {
+                        let page = &TreePage::new(
+                            self.flusher
+                                .read_drop(children.get(idx + 1).unwrap().clone()),
+                        );
+                        current_node = self.codec.decode(page).unwrap();
+                    }
+                }
+                NodeType::Leaf(entries, _, _) => {
+                    let index = NodeInner::find_key(search.clone(), &entries)?;
+
+                    if *entries.get(index).unwrap() == search {
+                        return Ok(current_node);
+                    } else {
+                        return Err(anyhow::Error::msg("Unexpected error"));
+                    }
+                }
+                _ => return Err(anyhow::Error::msg("Unexpected error")),
+            }
+        }
     }
 
     pub(crate) fn print(&self) {
+        let page = self.flusher.read_drop(*self.root_page_id.borrow());
+
+        let parent = self.codec.decode(&TreePage::new(page)).unwrap();
+        self.print_tree(&parent, 0);
+
         unimplemented!()
+    }
+
+    pub(self) fn print_tree(&self, node: &NodeInner, depth: usize) {
+        match &node.node_type {
+            NodeType::Internal(children, keys, current) => {
+                if node.is_root {
+                    print!("Is Root ");
+                }
+                println!("\nChildren {:?} Current Page {:?}", children, current);
+                print!("Keys [ ");
+                for key in keys {
+                    let (key_bytes, _) = NodeInner::deconstruct_value(key);
+                    print!("Keys ( {:?} )", key_bytes)
+                }
+                print!(" ]\n");
+
+                for child in children {
+                    let page = self.flusher.read_drop(*child);
+                    let child = self.codec.decode(&TreePage::new(page)).unwrap();
+                    self.print_tree(&child, depth + 1);
+                }
+            }
+            NodeType::Leaf(entries, next, current) => {
+                println!("\nEntries [ ");
+                for entry in entries {
+                    let (key_bytes, value) = NodeInner::deconstruct_value(entry);
+                    print!("        Key {:?} Value {:?} \n", key_bytes, value.unwrap(),);
+                }
+                println!("\n], current {:?} next {:?} \n ", current, next);
+            }
+            NodeType::Unexpected => {
+                return;
+            }
+        }
+    }
+
+    pub(self) fn get_candidate(
+        &self,
+        parent: &NodeInner,
+        child_id: PagePointer,
+    ) -> anyhow::Result<(NodeInner, bool, NodeKey)> {
+        match &parent.node_type {
+            NodeType::Internal(children, keys, _) => {
+                let node_idx = match children.binary_search(&child_id) {
+                    std::result::Result::Ok(idx) => idx,
+                    Err(_) => return Err(anyhow::Error::msg("Key not found")),
+                };
+
+                let separator_key = keys.get(node_idx).unwrap_or_else(|| &keys[node_idx - 1]);
+                let mut is_left = false;
+                let candidate_index = node_idx + 1;
+
+                let candidate: NodeInner;
+
+                if let Some(id) = children.get(candidate_index) {
+                    let page = self.flusher.read_drop(*id);
+
+                    candidate = self.codec.decode(&TreePage::new(page))?;
+                } else {
+                    let id = children.get(node_idx - 1).unwrap();
+                    is_left = true;
+
+                    let page = self.flusher.read_drop(*id);
+                    candidate = self.codec.decode(&TreePage::new(page))?;
+                }
+
+                return Ok((candidate, is_left, separator_key.clone()));
+            }
+
+            _ => return Err(anyhow::Error::msg("Unexpected error")),
+        };
     }
 
     pub(crate) fn borrow_if_needed(
         &self,
+        parent_id: PagePointer,
         child_id: PagePointer,
         child_node: NodeInner,
         // mut context: Context,
     ) -> anyhow::Result<()> {
+        let page = self.flusher.read_drop(parent_id);
+
+        let parent = self.codec.decode(&TreePage::new(page))?;
+
+        let (candidate, is_left, separator) = self.get_candidate(&parent, child_id)?;
+
+        let mut current_node = child_node;
+        let mut current_candidate = candidate;
+        let mut current_parent_node = parent;
+
+        loop {
+            if current_candidate.can_borrow(self.b) {
+                current_node.borrow(
+                    &mut current_parent_node,
+                    &mut current_candidate,
+                    is_left,
+                    separator.clone(),
+                )?;
+
+                self.flusher
+                    .pop_flush(Codec::encode(&current_node).unwrap().get_data(), child_id)?;
+
+                self.flusher.pop_flush(
+                    Codec::encode(&current_parent_node).unwrap().get_data(),
+                    parent_id,
+                )?;
+
+                let candidate_id = current_candidate.pointer;
+
+                self.flusher.write_flush(
+                    Codec::encode(&current_candidate).unwrap().get_data(),
+                    candidate_id,
+                )?;
+                return Ok(());
+            }
+
+            current_node.merge(&current_candidate)?;
+            match current_node.node_type {
+                NodeType::Internal(_, _, _) => {
+                    current_node.insert_key(separator.clone())?;
+                }
+                _ => {}
+            }
+
+            current_parent_node
+                .remove_sibling_node(separator.clone(), current_candidate.pointer)?;
+
+            self.flusher
+                .pop_flush(Codec::encode(&current_node).unwrap().get_data(), child_id)?;
+
+            self.flusher.pop_flush(
+                Codec::encode(&current_parent_node).unwrap().get_data(),
+                parent_id,
+            )?;
+
+            let candidate_id = current_candidate.pointer;
+
+            self.flusher.write_flush(
+                Codec::encode(&current_candidate).unwrap().get_data(),
+                candidate_id,
+            )?;
+
+            if current_parent_node.get_key_array_length() >= self.b - 1 {
+                return Ok(());
+            } else {
+                current_node = current_parent_node.clone();
+
+                let page = self.flusher.read_top()?;
+
+                let parent = self.codec.decode(&TreePage::new(page))?;
+
+                let (candidate, is_left, separator) = self.get_candidate(&parent, child_id)?;
+
+                current_candidate = candidate;
+                current_parent_node = parent;
+            }
+        }
+
         unimplemented!()
     }
 
@@ -116,10 +403,8 @@ impl<'a> BPTree<'a> {
         let mut contex: VecDeque<PagePointer> = VecDeque::new();
 
         let root_id = *self.root_page_id.borrow_mut();
-        self.flusher.aqquire_sh(root_id)?;
-        let mut page = self.flusher.read(root_id)?;
 
-        // TODO Drop Here
+        let mut page = self.flusher.read_drop(root_id);
 
         let mut parent = self.codec.decode(&TreePage::new(page))?;
 
@@ -137,10 +422,7 @@ impl<'a> BPTree<'a> {
 
                     match lock {
                         Lock::EXLOCK => {
-                            self.flusher.aqquire_sh(child_pointer)?;
-                            page = self.flusher.read(child_pointer)?;
-
-                            // TODO Drop Here
+                            page = self.flusher.read_drop(child_pointer);
 
                             let child_node = self.codec.decode(&TreePage::new(page))?;
 
@@ -165,10 +447,7 @@ impl<'a> BPTree<'a> {
                             parent = child_node;
                         }
                         Lock::SHLOCK => {
-                            self.flusher.aqquire_sh(child_pointer)?;
-                            page = self.flusher.read(child_pointer)?;
-
-                            // TODO Drop Here
+                            page = self.flusher.read_drop(child_pointer);
 
                             let child_node = self.codec.decode(&TreePage::new(page))?;
 
@@ -189,9 +468,79 @@ impl<'a> BPTree<'a> {
 
     pub(crate) fn propogate_upwards(
         &self,
-        node: NodeInner,
+        mut node: NodeInner,
         // mut context: Context,
     ) -> anyhow::Result<()> {
-        unimplemented!()
+        let mut was_root = node.is_root;
+
+        let (median, mut sibling) = node.split(self.b).unwrap();
+        // New func to set pointer
+        sibling.next_pointer = None;
+
+        let page_pointer = node.pointer;
+
+        // New func to set pointer
+        sibling.pointer = self.flusher.new_page();
+        // New func to set pointer
+        node.next_pointer = Some(sibling.pointer);
+
+        let mut data: [u8; PAGE_SIZE];
+
+        {
+            data = Codec::encode(&node).unwrap().get_data();
+            self.flusher.pop_flush(data, page_pointer)?;
+        }
+
+        {
+            data = Codec::encode(&sibling).unwrap().get_data();
+            self.flusher.write_flush(data, sibling.pointer)?;
+        }
+
+        if was_root {
+            self.new_root(median.clone(), node.pointer, sibling.pointer);
+        }
+
+        loop {
+            let data = self.flusher.read_top().unwrap();
+            let mut current_node = self.codec.decode(&TreePage::new(data)).unwrap();
+
+            current_node.insert_sibling_node(median.clone(), sibling.pointer)?;
+
+            // Insert into current with no split
+            if current_node.get_key_array_length() < 2 * self.b {
+                self.flusher
+                    .pop_flush(
+                        Codec::encode(&current_node).unwrap().get_data(),
+                        current_node.pointer,
+                    )
+                    .unwrap();
+
+                return Ok(());
+            }
+
+            // insert into current and split
+            was_root = current_node.is_root;
+
+            let (median, mut sibling) = current_node.split(self.b).unwrap();
+
+            // New func to set pointer
+            sibling.pointer = self.flusher.new_page();
+
+            self.flusher
+                .pop_flush(
+                    Codec::encode(&current_node).unwrap().get_data(),
+                    current_node.pointer,
+                )
+                .unwrap();
+
+            {
+                let data = Codec::encode(&sibling).unwrap().get_data();
+                self.flusher.write_flush(data, sibling.pointer)?;
+            }
+
+            if was_root {
+                self.new_root(median.clone(), node.pointer, sibling.pointer);
+            }
+        }
     }
 }

@@ -455,8 +455,10 @@ impl Node {
             NodeType::Internal(_, ref mut keys, _) => {
                 println!("\n\nKeys in pop back{:?}", keys);
                 let len = keys.len();
+
                 let promotion_key = keys.get(0).unwrap().clone();
                 let (key, page_id) = self.remove_key_at_index(len - 1, true)?;
+
                 return Ok((
                     NodeKey::GuidePostKey(key),
                     NodeKey::GuidePostKey(promotion_key),
