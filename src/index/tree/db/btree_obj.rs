@@ -1,23 +1,19 @@
 #![allow(unused_variables)] // TODO(you): remove this lint after implementing this mod
 #![allow(dead_code)] // TODO(you): remove this lint after implementing this mod
 
-use std::{cell::RefCell, collections::VecDeque, sync::Arc};
+use std::{ cell::RefCell, collections::VecDeque, sync::Arc };
 
 use anyhow::Ok;
 
 use crate::{
-    buffer::{
-        buffer_pool_manager::{BufferPoolManager, FileId},
-        flusher::{Flusher, Lock},
-    },
+    buffer::{ buffer_pool_manager::{ BufferPoolManager, FileId }, flusher::{ Flusher, Lock } },
     index::tree::{
-        index_types::{KeyValuePair, NodeKey},
-        tree_node::{
-            node_type::{NodeType, PagePointer},
-            tree_node_inner::NodeInner,
-        },
-        tree_page::{codec::Codec, page::TreePage, tree_page_layout::PAGE_SIZE},
+        byte_box::DataType,
+        index_types::{ KeyValuePair, NodeKey },
+        tree_node::{ node_type::{ NodeType, PagePointer }, tree_node_inner::NodeInner },
+        tree_page::{ codec::Codec, page::TreePage, tree_page_layout::PAGE_SIZE },
     },
+    storage::disk::manager::Manager,
 };
 
 pub enum WriteOperation {
@@ -35,6 +31,9 @@ pub struct BPTree {
     codec: Codec,
 }
 
+const NUM_FRAMES: usize = 10;
+const K_DIST: usize = 2;
+
 pub struct BTreeBuilder {
     /// Path to the tree file
     // Parameter b is the orber of the tree
@@ -47,18 +46,54 @@ pub struct BTreeBuilder {
 
     // The number of pointers to chilb nodes in a btree is represented as
     // num_of_pointers = 2b
+
+    table_schema: Codec,
 }
 
 impl BTreeBuilder {
     pub fn new() -> BTreeBuilder {
-        unimplemented!()
+        BTreeBuilder {
+            b: 0,
+            table_schema: Codec { key_type: DataType::None, value_type: DataType::None },
+        }
     }
-    pub fn b_parameter(self, d: usize) -> BTreeBuilder {
-        unimplemented!()
+    pub fn b_parameter(&mut self, b: usize) -> &mut Self {
+        self.b = b;
+        self
     }
 
-    pub fn build(&self, index_name: String, bpm: Arc<BufferPoolManager>) -> anyhow::Result<BPTree> {
-        unimplemented!()
+    pub fn tree_schema(&mut self, codec: Codec) -> &mut Self {
+        self.table_schema = codec;
+        self
+    }
+
+    pub fn build(self, bpm: Arc<BufferPoolManager>) -> anyhow::Result<BPTree> {
+        let (log_io, log_file_path) = Manager::open_log();
+        let manager = Manager::new(log_io, log_file_path);
+
+        let bpm = Arc::new(BufferPoolManager::new(NUM_FRAMES, manager, K_DIST));
+        let file_id = bpm.allocate_file();
+
+        let flusher = Flusher::new(bpm, file_id);
+
+        let page_pointer = flusher.new_page();
+        let root = NodeInner::new(
+            NodeType::Leaf(vec![], page_pointer, None),
+            true,
+            page_pointer,
+            None
+        );
+
+        let root_page_data = Codec::encode(&root)?;
+        flusher.write_flush(root_page_data.get_data(), page_pointer)?;
+
+        Ok(BPTree {
+            flusher,
+            root_page_id: RefCell::new(page_pointer),
+            index_id: file_id,
+            b: self.b,
+            codec: self.table_schema,
+        })
     }
 }
 
@@ -69,7 +104,7 @@ impl BPTree {
             NodeType::Internal(vec![left_child, right_child], vec![key], new_root_pointer),
             true,
             new_root_pointer,
-            None,
+            None
         );
 
         let mut page_id = self.root_page_id.try_borrow_mut().unwrap();
@@ -77,9 +112,7 @@ impl BPTree {
 
         let page = Codec::encode(&new_root).unwrap();
 
-        self.flusher
-            .write_flush(page.get_data(), new_root_pointer)
-            .unwrap();
+        self.flusher.write_flush(page.get_data(), new_root_pointer).unwrap();
 
         unimplemented!()
     }
@@ -117,8 +150,12 @@ impl BPTree {
                         current_node = self.codec.decode(page).unwrap();
                     } else {
                         let page = &TreePage::new(
-                            self.flusher
-                                .read_drop(children.get(idx + 1).unwrap().clone()),
+                            self.flusher.read_drop(
+                                children
+                                    .get(idx + 1)
+                                    .unwrap()
+                                    .clone()
+                            )
                         );
                         current_node = self.codec.decode(page).unwrap();
                     }
@@ -173,7 +210,6 @@ impl BPTree {
                 }
             }
         }
-        
     }
 
     pub fn find_node(&self, search: NodeKey) -> anyhow::Result<NodeInner> {
@@ -206,8 +242,12 @@ impl BPTree {
                         current_node = self.codec.decode(page).unwrap();
                     } else {
                         let page = &TreePage::new(
-                            self.flusher
-                                .read_drop(children.get(idx + 1).unwrap().clone()),
+                            self.flusher.read_drop(
+                                children
+                                    .get(idx + 1)
+                                    .unwrap()
+                                    .clone()
+                            )
                         );
                         current_node = self.codec.decode(page).unwrap();
                     }
@@ -221,7 +261,9 @@ impl BPTree {
                         return Err(anyhow::Error::msg("Unexpected error"));
                     }
                 }
-                _ => return Err(anyhow::Error::msg("Unexpected error")),
+                _ => {
+                    return Err(anyhow::Error::msg("Unexpected error"));
+                }
             }
         }
     }
@@ -245,7 +287,7 @@ impl BPTree {
                 print!("Keys [ ");
                 for key in keys {
                     let (key_bytes, _) = NodeInner::deconstruct_value(key);
-                    print!("Keys ( {:?} )", key_bytes)
+                    print!("Keys ( {:?} )", key_bytes);
                 }
                 print!(" ]\n");
 
@@ -259,7 +301,7 @@ impl BPTree {
                 println!("\nEntries [ ");
                 for entry in entries {
                     let (key_bytes, value) = NodeInner::deconstruct_value(entry);
-                    print!("        Key {:?} Value {:?} \n", key_bytes, value.unwrap(),);
+                    print!("        Key {:?} Value {:?} \n", key_bytes, value.unwrap());
                 }
                 println!("\n], current {:?} next {:?} \n ", current, next);
             }
@@ -272,13 +314,15 @@ impl BPTree {
     pub(self) fn get_candidate(
         &self,
         parent: &NodeInner,
-        child_id: PagePointer,
+        child_id: PagePointer
     ) -> anyhow::Result<(NodeInner, bool, NodeKey)> {
         match &parent.node_type {
             NodeType::Internal(children, keys, _) => {
                 let node_idx = match children.binary_search(&child_id) {
                     std::result::Result::Ok(idx) => idx,
-                    Err(_) => return Err(anyhow::Error::msg("Key not found")),
+                    Err(_) => {
+                        return Err(anyhow::Error::msg("Key not found"));
+                    }
                 };
 
                 let separator_key = keys.get(node_idx).unwrap_or_else(|| &keys[node_idx - 1]);
@@ -302,7 +346,9 @@ impl BPTree {
                 return Ok((candidate, is_left, separator_key.clone()));
             }
 
-            _ => return Err(anyhow::Error::msg("Unexpected error")),
+            _ => {
+                return Err(anyhow::Error::msg("Unexpected error"));
+            }
         };
     }
 
@@ -310,7 +356,7 @@ impl BPTree {
         &self,
         parent_id: PagePointer,
         child_id: PagePointer,
-        child_node: NodeInner,
+        child_node: NodeInner
         // mut context: Context,
     ) -> anyhow::Result<()> {
         let page = self.flusher.read_drop(parent_id);
@@ -329,22 +375,21 @@ impl BPTree {
                     &mut current_parent_node,
                     &mut current_candidate,
                     is_left,
-                    separator.clone(),
+                    separator.clone()
                 )?;
 
-                self.flusher
-                    .pop_flush(Codec::encode(&current_node).unwrap().get_data(), child_id)?;
+                self.flusher.pop_flush(Codec::encode(&current_node).unwrap().get_data(), child_id)?;
 
                 self.flusher.pop_flush(
                     Codec::encode(&current_parent_node).unwrap().get_data(),
-                    parent_id,
+                    parent_id
                 )?;
 
                 let candidate_id = current_candidate.pointer;
 
                 self.flusher.write_flush(
                     Codec::encode(&current_candidate).unwrap().get_data(),
-                    candidate_id,
+                    candidate_id
                 )?;
                 return Ok(());
             }
@@ -357,22 +402,20 @@ impl BPTree {
                 _ => {}
             }
 
-            current_parent_node
-                .remove_sibling_node(separator.clone(), current_candidate.pointer)?;
+            current_parent_node.remove_sibling_node(separator.clone(), current_candidate.pointer)?;
 
-            self.flusher
-                .pop_flush(Codec::encode(&current_node).unwrap().get_data(), child_id)?;
+            self.flusher.pop_flush(Codec::encode(&current_node).unwrap().get_data(), child_id)?;
 
             self.flusher.pop_flush(
                 Codec::encode(&current_parent_node).unwrap().get_data(),
-                parent_id,
+                parent_id
             )?;
 
             let candidate_id = current_candidate.pointer;
 
             self.flusher.write_flush(
                 Codec::encode(&current_candidate).unwrap().get_data(),
-                candidate_id,
+                candidate_id
             )?;
 
             if current_parent_node.get_key_array_length() >= self.b - 1 {
@@ -396,7 +439,7 @@ impl BPTree {
         &self,
         search_key: NodeKey,
         lock: Lock,
-        operation: WriteOperation,
+        operation: WriteOperation
     ) -> anyhow::Result<VecDeque<PagePointer>> {
         let mut contex: VecDeque<PagePointer> = VecDeque::new();
 
@@ -415,7 +458,10 @@ impl BPTree {
                     if idx >= keys.len() || keys[idx] != search_key {
                         child_pointer = children.get(idx).unwrap().clone();
                     } else {
-                        child_pointer = children.get(idx + 1).unwrap().clone();
+                        child_pointer = children
+                            .get(idx + 1)
+                            .unwrap()
+                            .clone();
                     }
 
                     match lock {
@@ -430,9 +476,9 @@ impl BPTree {
                             // Check if node is safe
                             // Future implementation will rely on less arbituary params
                             if let WriteOperation::Insert = operation {
-                                safe = key_array_length + 1 < self.b * 2
+                                safe = key_array_length + 1 < self.b * 2;
                             } else {
-                                safe = key_array_length - 1 > self.b - 1
+                                safe = key_array_length - 1 > self.b - 1;
                             }
 
                             if safe {
@@ -459,14 +505,16 @@ impl BPTree {
                     return Ok(contex);
                 }
 
-                NodeType::Unexpected => return Err(anyhow::Error::msg("Unexpected error")),
+                NodeType::Unexpected => {
+                    return Err(anyhow::Error::msg("Unexpected error"));
+                }
             }
         }
     }
 
     pub(crate) fn propogate_upwards(
         &self,
-        mut node: NodeInner,
+        mut node: NodeInner
         // mut context: Context,
     ) -> anyhow::Result<()> {
         let mut was_root = node.is_root;
@@ -509,7 +557,7 @@ impl BPTree {
                 self.flusher
                     .pop_flush(
                         Codec::encode(&current_node).unwrap().get_data(),
-                        current_node.pointer,
+                        current_node.pointer
                     )
                     .unwrap();
 
@@ -525,10 +573,7 @@ impl BPTree {
             sibling.pointer = self.flusher.new_page();
 
             self.flusher
-                .pop_flush(
-                    Codec::encode(&current_node).unwrap().get_data(),
-                    current_node.pointer,
-                )
+                .pop_flush(Codec::encode(&current_node).unwrap().get_data(), current_node.pointer)
                 .unwrap();
 
             {
