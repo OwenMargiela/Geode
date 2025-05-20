@@ -173,7 +173,7 @@ impl BPTree {
                 }
             }
         }
-        unimplemented!()
+        
     }
 
     pub fn find_node(&self, search: NodeKey) -> anyhow::Result<NodeInner> {
@@ -390,8 +390,6 @@ impl BPTree {
                 current_parent_node = parent;
             }
         }
-
-        unimplemented!()
     }
 
     pub(crate) fn tree_descent(

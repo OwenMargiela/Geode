@@ -8,7 +8,7 @@ use crate::index::tree::{
 
 use super::node_type::{NodeType, PagePointer};
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug,PartialEq, Eq)]
 pub struct NodeInner {
     pub node_type: NodeType,
     pub is_root: bool,
