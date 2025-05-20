@@ -254,6 +254,24 @@ impl Flusher {
         return Err(anyhow::Error::msg("Invalid stack len"));
     }
 
+    // Transaction ticket to coordinate who can and cant read top?
+    pub fn read_parent(&self) -> anyhow::Result<[u8; PAGE_SIZE]> {
+        let context = &self.context;
+        let stack = context.stack.try_read().unwrap();
+        if stack.len() > 0 {
+            let data = stack.get(stack.len().wrapping_sub(2)).unwrap();
+
+            let gaurd = self.inner.read_page(self.file, data.clone());
+            let data = gaurd.get_frame().data;
+            drop(gaurd);
+            
+
+            return Ok(data);
+        }
+
+        return Err(anyhow::Error::msg("Invalid stack len"));
+    }
+
     pub fn write_flush(&self, data: [u8; PAGE_SIZE], page_id: u32) -> anyhow::Result<()> {
         self.aqquire_ex(page_id)?;
         self.write_all(page_id, data)?;
@@ -269,6 +287,18 @@ impl Flusher {
         if context.stack.try_read().unwrap().len() > 0 {
             id = context.stack.try_write().unwrap().pop_front().unwrap();
 
+            self.lock_table.remove(&id).unwrap();
+        }
+
+        Ok(())
+    }
+
+    pub fn release_ex_all(&self) -> anyhow::Result<()> {
+        let context = &self.context;
+
+        let id: u32;
+
+        while let Some(id) = context.stack.try_write().unwrap().pop_front() {
             self.lock_table.remove(&id).unwrap();
         }
 

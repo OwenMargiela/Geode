@@ -40,7 +40,7 @@ pub mod test {
 
         let kv_vec = get_kv_vec();
 
-        let mut leaf_node = NodeInner::new(
+        let leaf_node = NodeInner::new(
             NodeType::Leaf(kv_vec, u32::default(), None),
             false,
             u32::default(),
@@ -50,8 +50,6 @@ pub mod test {
         let page = Codec::encode(&leaf_node).unwrap();
         let node = codec.decode(&page).unwrap();
         assert_eq!(node, leaf_node);
-
-        let (media, sibling) = leaf_node.split(3).unwrap();
     }
 
     fn get_kv_vec() -> Vec<NodeKey> {

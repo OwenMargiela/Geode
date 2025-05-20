@@ -1,9 +1,11 @@
 #[cfg(test)]
 pub mod test {
+    use std::{ fs::{ remove_dir_all, remove_file }, path::PathBuf };
+
     use crate::index::tree::{
         byte_box::{ ByteBox, DataType },
         db::btree_obj::BTreeBuilder,
-        index_types::KeyValuePair,
+        index_types::{ KeyValuePair, NodeKey },
         tree_page::codec::Codec,
     };
 
@@ -23,12 +25,50 @@ pub mod test {
         for (idx, key) in key_vec.into_iter().enumerate() {
             tree.insert(key).unwrap();
 
-            if idx == 9 {
+            if idx == 14 {
                 break;
             }
         }
 
         tree.print();
+        teardown();
+    }
+
+    #[test]
+    fn refactor_deletion_works() {
+        let tree = BTreeBuilder::new()
+            .b_parameter(2)
+            .tree_schema(Codec {
+                key_type: DataType::SmallInt,
+                value_type: DataType::Varchar(15),
+            })
+            .build()
+            .unwrap();
+
+        let key_vec = get_kv_vec();
+
+        for key in key_vec.clone().into_iter() {
+            tree.insert(key).unwrap();
+        }
+
+        for (idx, key) in key_vec.clone().into_iter().enumerate() {
+            let key = NodeKey::GuidePost(key.key);
+            tree.delete(key).unwrap();
+
+            if idx == 2 {
+                break;
+            }
+        }
+
+        tree.print();
+        teardown();
+    }
+
+    fn teardown() {
+        let log_file_path = PathBuf::from("log_file_path.bin");
+        let db_path = PathBuf::from("geodeData");
+        remove_file(log_file_path).unwrap();
+        remove_dir_all(db_path).unwrap();
     }
 
     fn get_kv_vec() -> Vec<KeyValuePair> {

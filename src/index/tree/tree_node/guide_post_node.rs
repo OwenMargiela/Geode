@@ -19,9 +19,9 @@ impl GuidePostNode {
         }
         let node_type = self.node_type.clone();
         match self.node_type {
-            NodeType::Internal(ref mut children, ref mut keys, _) => {
+            NodeType::Internal(_, ref mut keys, _) => {
                 let idx = NodeInner::binary_search_in_key(&search, &keys)?;
-                children.remove(idx);
+                keys.remove(idx);
                 Ok(())
             }
 
@@ -89,8 +89,8 @@ impl GuidePostNode {
     pub fn remove_sibling_node(&mut self, key: NodeKey, child: PagePointer) -> anyhow::Result<()> {
         match self.node_type {
             NodeType::Internal(_, _, _) => {
-                self.remove_child_pointer(child)?;
                 self.remove_key(key)?;
+                self.remove_child_pointer(child)?;
 
                 Ok(())
             }
@@ -103,7 +103,10 @@ impl GuidePostNode {
         match self.node_type {
             NodeType::Internal(ref mut children, _, _) => {
                 let idx = children.binary_search(&child).unwrap_or_else(|x| x);
-                children.remove(idx);
+                let dat = children.remove(idx);
+
+                println!("Removed this {}", dat);
+
                 Ok(())
             }
 

@@ -348,21 +348,20 @@ impl BPTree {
         };
     }
 
-    pub(crate) fn borrow_if_needed(
+    pub(crate) fn 
+    borrow_if_needed(
         &self,
-        parent_id: PagePointer,
-        child_id: PagePointer,
-        child_node: NodeInner
+        parent: NodeInner,
+        child_node: NodeInner,
+        child_id: PagePointer
         // mut context: Context,
     ) -> anyhow::Result<()> {
-        let page = self.flusher.read_drop(parent_id);
-
-        let parent = self.codec.decode(&TreePage::new(page))?;
-
         let (candidate, is_left, separator) = self.get_candidate(&parent, child_id)?;
 
         let mut current_node = child_node;
         let mut current_candidate = candidate;
+        let mut parent_id = parent.pointer.clone();
+
         let mut current_parent_node = parent;
 
         loop {
@@ -387,10 +386,17 @@ impl BPTree {
                     Codec::encode(&current_candidate).unwrap().get_data(),
                     candidate_id
                 )?;
+
+                println!("Borrowed");
                 return Ok(());
             }
 
+            println!("Pre Merge Candidate {:?}\n\n", current_node);
+
             current_node.merge(&current_candidate)?;
+
+            println!("Post merge {:?}\n\n", current_node);
+
             match current_node.node_type {
                 NodeType::Internal(_, _, _) => {
                     current_node.insert_key(separator.clone())?;
@@ -398,7 +404,11 @@ impl BPTree {
                 _ => {}
             }
 
+            println!("Pre Merge Remove {:?}\n\n", current_parent_node);
+
             current_parent_node.remove_sibling_node(separator.clone(), current_candidate.pointer)?;
+
+            println!("Post Remove {:?}\n\n", current_parent_node);
 
             self.flusher.pop_flush(Codec::encode(&current_node).unwrap().get_data(), child_id)?;
 
@@ -415,8 +425,10 @@ impl BPTree {
             )?;
 
             if current_parent_node.get_key_array_length() >= self.b - 1 {
+                println!("End");
                 return Ok(());
             } else {
+                println!("Nope");
                 current_node = current_parent_node.clone();
 
                 let page = self.flusher.read_top()?;
@@ -426,6 +438,9 @@ impl BPTree {
                 let (candidate, is_left, separator) = self.get_candidate(&parent, child_id)?;
 
                 current_candidate = candidate;
+
+                parent_id = current_parent_node.pointer.clone();
+
                 current_parent_node = parent;
             }
         }
@@ -461,10 +476,6 @@ impl BPTree {
                             .clone();
                     }
 
-                    if child_pointer == 1 {
-                        println!("Child {:?}", child_pointer);
-                    }
-
                     match lock {
                         Lock::EXLOCK => {
                             page = self.flusher.read_drop(child_pointer);
@@ -481,8 +492,6 @@ impl BPTree {
                             } else {
                                 safe = key_array_length - 1 > self.b - 1;
                             }
-
-                            println!("Node {child_pointer} is safe: {safe}");
 
                             if safe {
                                 let page = contex.pop_front();
