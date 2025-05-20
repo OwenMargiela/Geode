@@ -3,10 +3,7 @@
 
 use crate::index::tree::{
     index_types::NodeKey,
-    tree_node::{
-        node_type::{NodeType, PagePointer},
-        tree_node_inner::NodeInner,
-    },
+    tree_node::{ node_type::{ NodeType, PagePointer }, tree_node_inner::NodeInner },
 };
 
 // Helper functions for btree node operations
@@ -34,7 +31,7 @@ impl NodeInner {
                     NodeType::Internal(sibling_children, sibling_keys, u32::default()),
                     self.is_root,
                     self.pointer,
-                    None,
+                    None
                 );
 
                 anyhow::Ok((median_key, new_node))
@@ -55,7 +52,7 @@ impl NodeInner {
                     NodeType::Leaf(sibling_pair, u32::default(), None),
                     self.is_root,
                     u32::default(),
-                    None,
+                    None
                 );
 
                 let (key, _) = NodeInner::deconstruct_value(&median_pair);
@@ -84,7 +81,7 @@ impl NodeInner {
         current_parent_node: &mut NodeInner,
         current_candidate: &mut NodeInner,
         is_left: bool,
-        separator_key: NodeKey,
+        separator_key: NodeKey
     ) -> anyhow::Result<()> {
         let promotion_key: NodeKey;
         let is_leaf = current_parent_node.is_leaf;
@@ -140,7 +137,9 @@ impl NodeInner {
 
                 return Ok(());
             }
-            _ => return Err(anyhow::Error::msg("Unexpected Error")),
+            _ => {
+                return Err(anyhow::Error::msg("Unexpected Error"));
+            }
         }
     }
 
@@ -154,8 +153,11 @@ impl NodeInner {
                         .cloned()
                         .collect();
 
-                    let mut merged_keys: Vec<NodeKey> =
-                        keys.iter().chain(sibling_keys.iter()).cloned().collect();
+                    let mut merged_keys: Vec<NodeKey> = keys
+                        .iter()
+                        .chain(sibling_keys.iter())
+                        .cloned()
+                        .collect();
 
                     // Is not viable for large sets
                     merged_pointers.sort();

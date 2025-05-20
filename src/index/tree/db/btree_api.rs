@@ -1,8 +1,6 @@
 #![allow(unused_variables)] // TODO(you): remove this lint after implementing this mod
 #![allow(dead_code)] // TODO(you): remove this lint after implementing this mod
 
-use std::{ ops::RangeBounds, sync::Arc };
-
 use anyhow::Ok;
 
 use crate::{
@@ -22,26 +20,27 @@ impl BPTree {
         let search_key = NodeKey::KeyValuePair(entry.clone());
 
         let context = self.tree_descent(search_key.clone(), Lock::EXLOCK, WriteOperation::Insert)?;
-        self.flusher.aqquire_context_ex(context)?;
+        self.flusher.aqquire_context_ex(context.clone())?;
 
         let leaf_node_page = &TreePage::new(self.flusher.read_top()?);
 
         let mut leaf_node = self.codec.decode(leaf_node_page)?;
 
-        if leaf_node.get_key_array_length() < self.b {
-            println!("No split");
+        leaf_node.insert_entry(entry.clone())?;
 
-            leaf_node.insert_entry(entry.clone())?;
-
+        if leaf_node.get_key_array_length() <= self.b {
             let leaf_page = Codec::encode(&leaf_node)?;
             self.flusher.pop_flush_test(leaf_page.get_data())?;
-        } else {
             self.flusher.release_ex()?;
 
+            return Ok(());
+        } else {
             println!("Full: implement Split");
-        }
 
-        Ok(())
+            self.propogate_upwards(leaf_node)?;
+            self.flusher.release_ex()?;
+            return Ok(());
+        }
     }
 
     pub fn delete(&self, search: NodeKey) -> anyhow::Result<()> {

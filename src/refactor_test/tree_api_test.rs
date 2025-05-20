@@ -21,12 +21,13 @@ pub mod test {
         let key_one = get_kv_vec().get(3).unwrap().clone();
         let key_two = get_kv_vec().get(0).unwrap().clone();
         let key_three = get_kv_vec().get(1).unwrap().clone();
-        // let key_four = get_kv_vec().get(4).unwrap().clone();
+        let key_four = get_kv_vec().get(4).unwrap().clone();
         // let key_five = get_kv_vec().get(5).unwrap().clone();
 
         tree.insert(key_one).unwrap();
         tree.insert(key_two).unwrap();
         tree.insert(key_three).unwrap();
+        // tree.insert(key_four).unwrap();
     }
 
     fn get_kv_vec() -> Vec<KeyValuePair> {

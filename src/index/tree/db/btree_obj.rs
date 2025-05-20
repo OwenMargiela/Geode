@@ -113,8 +113,6 @@ impl BPTree {
         let page = Codec::encode(&new_root).unwrap();
 
         self.flusher.write_flush(page.get_data(), new_root_pointer).unwrap();
-
-        unimplemented!()
     }
 
     pub fn search(&self, search: NodeKey) -> anyhow::Result<KeyValuePair> {
@@ -481,6 +479,8 @@ impl BPTree {
                                 safe = key_array_length - 1 > self.b - 1;
                             }
 
+                            println!("Node {child_pointer} is safe: {safe}");
+
                             if safe {
                                 contex.pop_front();
                                 contex.push_front(child_pointer);
@@ -547,7 +547,15 @@ impl BPTree {
         }
 
         loop {
-            let data = self.flusher.read_top().unwrap();
+            let data = match self.flusher.read_top() {
+                anyhow::Result::Ok(data) => {
+                    data
+                    // Use `data: [u8; BLOCK_SIZE]`
+                }
+                Err(e) => {
+                    return Ok(());
+                }
+            };
             let mut current_node = self.codec.decode(&TreePage::new(data)).unwrap();
 
             current_node.insert_sibling_node(median.clone(), sibling.pointer)?;
