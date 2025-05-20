@@ -1,15 +1,9 @@
 #![allow(unused_variables)] // TODO(you): remove this lint after implementing this mod
 #![allow(dead_code)] // TODO(you): remove this lint after implementing this mod
 
-use crate::index::tree::{
-    byte_box::ByteBox,
-    index_types::{KeyValuePair, NodeKey},
-};
+use crate::index::tree::{ byte_box::ByteBox, index_types::{ KeyValuePair, NodeKey } };
 
-use super::{
-    node_type::NodeType,
-    tree_node_inner::{KvNode, NodeInner},
-};
+use super::{ node_type::NodeType, tree_node_inner::{ KvNode, NodeInner } };
 
 impl KvNode {
     /// Inserts a key value pair entry into a leaf node
@@ -17,21 +11,20 @@ impl KvNode {
     pub fn insert_entry(&mut self, new_entry: KeyValuePair) -> anyhow::Result<()> {
         let search_value = new_entry.key.clone();
 
-        let new_pair = NodeKey::KeyValuePair(new_entry);
+        let new_pair = NodeKey::KeyValuePair(new_entry.clone());
 
         match self.node_type {
             NodeType::Leaf(ref mut entries, _, _) => {
+                let key = new_entry.key;
+
                 let idx = entries
-                    .binary_search_by(|entry| {
-                        let (key, _) = NodeInner::deconstruct_value(entry);
-                        key.cmp(&search_value)
-                    })
+                    .binary_search_by_key(&key, |p| p.to_kv_pair().unwrap().key)
                     .unwrap_or_else(|x| x);
 
-                let entry = entries.get(idx).unwrap();
-
-                if entry.to_kv_pair()? == new_pair.to_kv_pair()? {
-                    return Err(anyhow::Error::msg("Entry already exists"));
+                if let Some(entry) = entries.get(idx) {
+                    if entry.to_kv_pair()? == new_pair.to_kv_pair()? {
+                        return Err(anyhow::Error::msg("Entry already exists"));
+                    }
                 }
 
                 entries.insert(idx, new_pair);
@@ -39,7 +32,9 @@ impl KvNode {
                 Ok(())
             }
 
-            _ => return Err(anyhow::Error::msg("Unexpected Error")),
+            _ => {
+                return Err(anyhow::Error::msg("Unexpected Error"));
+            }
         }
     }
 
@@ -61,7 +56,9 @@ impl KvNode {
                 Ok(())
             }
 
-            _ => return Err(anyhow::Error::msg("Unexpected Error")),
+            _ => {
+                return Err(anyhow::Error::msg("Unexpected Error"));
+            }
         }
     }
 
@@ -74,7 +71,9 @@ impl KvNode {
                 Ok(entry)
             }
 
-            _ => return Err(anyhow::Error::msg("Unexpected Error")),
+            _ => {
+                return Err(anyhow::Error::msg("Unexpected Error"));
+            }
         }
     }
 

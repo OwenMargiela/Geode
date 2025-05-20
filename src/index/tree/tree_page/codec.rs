@@ -24,6 +24,7 @@ use crate::{
 
 use super::{ page::TreePage, tree_page_layout::LEAF_NODE_HEADER_SIZE };
 
+#[derive(Clone)]
 pub struct Codec {
     pub(crate) key_type: DataType,
     pub(crate) value_type: DataType,

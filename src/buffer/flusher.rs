@@ -1,20 +1,15 @@
 #![allow(unused_variables)] // TODO(you): remove this lint after implementing this mod
 #![allow(dead_code)] // TODO(you): remove this lint after implementing this mod
 
-use std::{
-    collections::VecDeque,
-    sync::{
-        atomic::{AtomicU32, Ordering},
-        Arc, RwLock,
-    },
-};
+use std::{ collections::VecDeque, sync::{ atomic::{ AtomicU32, Ordering }, Arc, RwLock } };
 
 use anyhow::Ok;
 
 use dashmap::DashMap;
 
 use crate::{
-    index::tree::tree_node::node_type::PagePointer, storage::page::btree_page_layout::PAGE_SIZE,
+    index::tree::tree_node::node_type::PagePointer,
+    storage::page::btree_page_layout::PAGE_SIZE,
 };
 
 use super::buffer_pool_manager::BufferPoolManager;
@@ -90,18 +85,13 @@ impl Flusher {
 
         let guard = self.inner.write_page(self.file, page_id);
 
-        self.lock_table.insert(
+        self.lock_table.insert(page_id, LockData {
+            guard: Lock::EXLOCK,
+            txn_num: self.txn_ticker.fetch_add(1, std::sync::atomic::Ordering::SeqCst),
+            ticker: AtomicU32::new(1),
+            txn_status: Status::Running,
             page_id,
-            LockData {
-                guard: Lock::EXLOCK,
-                txn_num: self
-                    .txn_ticker
-                    .fetch_add(1, std::sync::atomic::Ordering::SeqCst),
-                ticker: AtomicU32::new(1),
-                txn_status: Status::Running,
-                page_id,
-            },
-        );
+        });
 
         Ok(())
     }
@@ -132,18 +122,13 @@ impl Flusher {
                 }
             }
         } else {
-            self.lock_table.insert(
+            self.lock_table.insert(page_id, LockData {
+                guard: Lock::SHLOCK,
+                txn_num: self.txn_ticker.fetch_add(1, std::sync::atomic::Ordering::SeqCst),
+                ticker: AtomicU32::new(1),
+                txn_status: Status::Running,
                 page_id,
-                LockData {
-                    guard: Lock::SHLOCK,
-                    txn_num: self
-                        .txn_ticker
-                        .fetch_add(1, std::sync::atomic::Ordering::SeqCst),
-                    ticker: AtomicU32::new(1),
-                    txn_status: Status::Running,
-                    page_id,
-                },
-            );
+            });
         }
 
         Ok(())
@@ -178,9 +163,9 @@ impl Flusher {
                 Lock::EXLOCK => {
                     dbg!("");
                     self.log_transaction(page_id);
-                    return Err(anyhow::Error::msg(
-                        "Incompatible Locks.Expected Shlock found Exlock",
-                    ));
+                    return Err(
+                        anyhow::Error::msg("Incompatible Locks.Expected Shlock found Exlock")
+                    );
                 }
 
                 _ => {
@@ -202,9 +187,9 @@ impl Flusher {
                 Lock::SHLOCK => {
                     dbg!("");
                     self.log_transaction(page_id);
-                    return Err(anyhow::Error::msg(
-                        "Incompatible Locks.Expected Exlock found Shlock",
-                    ));
+                    return Err(
+                        anyhow::Error::msg("Incompatible Locks.Expected Exlock found Shlock")
+                    );
                 }
 
                 _ => {
@@ -273,6 +258,19 @@ impl Flusher {
         Ok(())
     }
 
+    pub fn release_ex(&self) -> anyhow::Result<()> {
+        let context = &self.context;
+
+        let id: u32;
+        if context.stack.try_read().unwrap().len() > 0 {
+            id = context.stack.try_write().unwrap().pop_front().unwrap();
+
+            self.lock_table.remove(&id).unwrap();
+        }
+
+        Ok(())
+    }
+
     pub fn log_transaction(&self, page_id: u32) {
         let txn = self.lock_table.get(&page_id).unwrap();
 
@@ -280,6 +278,6 @@ impl Flusher {
         dbg!(&txn.txn_status);
         dbg!(&txn.txn_num);
         dbg!(&txn.ticker);
-        dbg!(&txn.guard,);
+        dbg!(&txn.guard);
     }
 }

@@ -22,13 +22,13 @@ pub enum WriteOperation {
 }
 
 pub struct BPTree {
-    flusher: Flusher,
-    root_page_id: RefCell<PagePointer>,
+    pub flusher: Flusher,
+    pub root_page_id: RefCell<PagePointer>,
 
     pub index_id: FileId,
 
     pub(crate) b: usize,
-    codec: Codec,
+    pub codec: Codec,
 }
 
 const NUM_FRAMES: usize = 10;
@@ -67,7 +67,7 @@ impl BTreeBuilder {
         self
     }
 
-    pub fn build(self, bpm: Arc<BufferPoolManager>) -> anyhow::Result<BPTree> {
+    pub fn build(&self) -> anyhow::Result<BPTree> {
         let (log_io, log_file_path) = Manager::open_log();
         let manager = Manager::new(log_io, log_file_path);
 
@@ -91,8 +91,8 @@ impl BTreeBuilder {
             flusher,
             root_page_id: RefCell::new(page_pointer),
             index_id: file_id,
-            b: self.b,
-            codec: self.table_schema,
+            b: self.b.clone(),
+            codec: self.table_schema.clone(),
         })
     }
 }
