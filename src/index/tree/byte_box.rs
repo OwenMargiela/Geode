@@ -74,7 +74,8 @@ impl ByteBox {
         let varchar_bytes = val.as_bytes();
         let len = varchar_bytes.len();
 
-        if charlen > len {
+        if len > charlen {
+            println!("{} {}", charlen, len);
             panic!("String Upperbound crossed");
         }
 

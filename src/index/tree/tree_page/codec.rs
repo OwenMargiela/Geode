@@ -151,10 +151,8 @@ impl Codec {
         cursor.seek(SeekFrom::Start(NodeHeader::Pointer.offset() as u64))?;
         cursor.write_u32::<LittleEndian>(pointer)?;
 
-        dbg!("Checkpoint 2");
         match node.node_type {
             NodeType::Internal(ref children, ref keys, _) => {
-                dbg!("Checkpoint 3");
                 // Header
                 cursor.seek(SeekFrom::Start(InternalNodeHeader::NumChildren.offset() as u64))?;
                 cursor.write_u32::<LittleEndian>(children.len() as u32)?;
