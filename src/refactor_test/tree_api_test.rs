@@ -18,16 +18,17 @@ pub mod test {
             .build()
             .unwrap();
 
-        let key_one = get_kv_vec().get(3).unwrap().clone();
-        let key_two = get_kv_vec().get(0).unwrap().clone();
-        let key_three = get_kv_vec().get(1).unwrap().clone();
-        let key_four = get_kv_vec().get(4).unwrap().clone();
-        // let key_five = get_kv_vec().get(5).unwrap().clone();
+        let key_vec = get_kv_vec();
 
-        tree.insert(key_one).unwrap();
-        tree.insert(key_two).unwrap();
-        tree.insert(key_three).unwrap();
-        // tree.insert(key_four).unwrap();
+        for (idx, key) in key_vec.into_iter().enumerate() {
+            tree.insert(key).unwrap();
+
+            if idx == 5 {
+                break;
+            }
+        }
+
+        tree.print();
     }
 
     fn get_kv_vec() -> Vec<KeyValuePair> {
@@ -50,7 +51,47 @@ pub mod test {
             },
             KeyValuePair {
                 key: ByteBox::small_int(50),
-                value: ByteBox::varchar("Rolando", 15),
+                value: ByteBox::varchar("Tarique", 15),
+            },
+            KeyValuePair {
+                key: ByteBox::small_int(60),
+                value: ByteBox::varchar("Tai", 15),
+            },
+            KeyValuePair {
+                key: ByteBox::small_int(70),
+                value: ByteBox::varchar("Chrishane", 15),
+            },
+            KeyValuePair {
+                key: ByteBox::small_int(80),
+                value: ByteBox::varchar("Darren", 15),
+            },
+            KeyValuePair {
+                key: ByteBox::small_int(90),
+                value: ByteBox::varchar("Justin", 15),
+            },
+            KeyValuePair {
+                key: ByteBox::small_int(100),
+                value: ByteBox::varchar("Karson", 15),
+            },
+            KeyValuePair {
+                key: ByteBox::small_int(110),
+                value: ByteBox::varchar("Marc", 15),
+            },
+            KeyValuePair {
+                key: ByteBox::small_int(120),
+                value: ByteBox::varchar("Dominigga", 15),
+            },
+            KeyValuePair {
+                key: ByteBox::small_int(130),
+                value: ByteBox::varchar("Sarah", 15),
+            },
+            KeyValuePair {
+                key: ByteBox::small_int(140),
+                value: ByteBox::varchar("Megatron", 15),
+            },
+            KeyValuePair {
+                key: ByteBox::small_int(150),
+                value: ByteBox::varchar("Headcliff", 15),
             }
         ]
     }

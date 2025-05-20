@@ -271,8 +271,6 @@ impl BPTree {
 
         let parent = self.codec.decode(&TreePage::new(page)).unwrap();
         self.print_tree(&parent, 0);
-
-        unimplemented!()
     }
 
     pub(self) fn print_tree(&self, node: &NodeInner, depth: usize) {
@@ -281,7 +279,7 @@ impl BPTree {
                 if node.is_root {
                     print!("Is Root ");
                 }
-                println!("\nChildren {:?} Current Page {:?}", children, current);
+                println!("\nChildren {:?} Current Page {:?}", children, node.pointer);
                 print!("Keys [ ");
                 for key in keys {
                     let (key_bytes, _) = NodeInner::deconstruct_value(key);
@@ -301,7 +299,7 @@ impl BPTree {
                     let (key_bytes, value) = NodeInner::deconstruct_value(entry);
                     print!("        Key {:?} Value {:?} \n", key_bytes, value.unwrap());
                 }
-                println!("\n], current {:?} next {:?} \n ", current, next);
+                println!("\n], current {:?} next {:?} \n ", node.pointer, node.next_pointer);
             }
             NodeType::Unexpected => {
                 return;
@@ -442,6 +440,7 @@ impl BPTree {
         let mut contex: VecDeque<PagePointer> = VecDeque::new();
 
         let root_id = *self.root_page_id.borrow_mut();
+        contex.push_front(root_id);
 
         let mut page = self.flusher.read_drop(root_id);
 
@@ -460,6 +459,10 @@ impl BPTree {
                             .get(idx + 1)
                             .unwrap()
                             .clone();
+                    }
+
+                    if child_pointer == 1 {
+                        println!("Child {:?}", child_pointer);
                     }
 
                     match lock {
@@ -482,7 +485,7 @@ impl BPTree {
                             println!("Node {child_pointer} is safe: {safe}");
 
                             if safe {
-                                contex.pop_front();
+                                let page = contex.pop_front();
                                 contex.push_front(child_pointer);
                             } else {
                                 contex.push_front(child_pointer);
@@ -501,7 +504,7 @@ impl BPTree {
                 }
 
                 NodeType::Leaf(_, pointer, _) => {
-                    contex.push_front(pointer.clone());
+                    // contex.push_front(pointer.clone());
                     return Ok(contex);
                 }
 
@@ -527,6 +530,7 @@ impl BPTree {
 
         // New func to set pointer
         sibling.pointer = self.flusher.new_page();
+
         // New func to set pointer
         node.next_pointer = Some(sibling.pointer);
 
@@ -559,6 +563,7 @@ impl BPTree {
             let mut current_node = self.codec.decode(&TreePage::new(data)).unwrap();
 
             current_node.insert_sibling_node(median.clone(), sibling.pointer)?;
+            println!("Checkpoint 1");
 
             // Insert into current with no split
             if current_node.get_key_array_length() < 2 * self.b {
@@ -568,9 +573,12 @@ impl BPTree {
                         current_node.pointer
                     )
                     .unwrap();
+                self.flusher.release_ex()?;
 
                 return Ok(());
             }
+
+            println!("Checkpoint 2");
 
             // insert into current and split
             was_root = current_node.is_root;

@@ -1,14 +1,11 @@
 #![allow(unused_variables)] // TODO(you): remove this lint after implementing this mod
 #![allow(dead_code)] // TODO(you): remove this lint after implementing this mod
 
-use crate::index::tree::{
-    byte_box::ByteBox,
-    index_types::{KeyValuePair, NodeKey},
-};
+use crate::index::tree::{ byte_box::ByteBox, index_types::{ KeyValuePair, NodeKey } };
 
-use super::node_type::{NodeType, PagePointer};
+use super::node_type::{ NodeType, PagePointer };
 
-#[derive(Clone, Debug,PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct NodeInner {
     pub node_type: NodeType,
     pub is_root: bool,
@@ -35,23 +32,25 @@ impl NodeInner {
         node_type: NodeType,
         is_root: bool,
         pointer: PagePointer,
-        next_pointer: Option<PagePointer>,
+        next_pointer: Option<PagePointer>
     ) -> NodeInner {
         match node_type {
-            NodeType::Internal(_, _, _) => NodeInner {
-                node_type,
-                is_root,
-                pointer,
-                next_pointer,
-                is_leaf: false,
-            },
-            _ => NodeInner {
-                node_type,
-                is_root,
-                pointer,
-                next_pointer,
-                is_leaf: true,
-            },
+            NodeType::Internal(_, _, _) =>
+                NodeInner {
+                    node_type,
+                    is_root,
+                    pointer,
+                    next_pointer,
+                    is_leaf: false,
+                },
+            _ =>
+                NodeInner {
+                    node_type,
+                    is_root,
+                    pointer,
+                    next_pointer,
+                    is_leaf: true,
+                },
         }
     }
 
@@ -59,7 +58,10 @@ impl NodeInner {
         match &self.node_type {
             NodeType::Internal(_, keys, _) => {
                 let len = keys.len();
-                let promotion_key = keys.get(len - 1).unwrap().clone();
+                let promotion_key = keys
+                    .get(len - 1)
+                    .unwrap()
+                    .clone();
                 let (key, page_id) = self.remove_inner_node_entry(0, false)?;
 
                 let (promotion_key, _) = NodeInner::deconstruct_value(&promotion_key);
@@ -76,7 +78,10 @@ impl NodeInner {
             }
             NodeType::Leaf(entries, _, _) => {
                 let len = entries.len();
-                let promotion_key = entries.get(len - 1).unwrap().clone();
+                let promotion_key = entries
+                    .get(len - 1)
+                    .unwrap()
+                    .clone();
                 let entry = self.remove_key_value_at_index(0)?;
 
                 let (promotion_key, _) = NodeInner::deconstruct_value(&promotion_key);
@@ -159,12 +164,11 @@ impl NodeInner {
         let (search_key, _) = NodeInner::deconstruct_value(&node_key);
 
         let idx = vec
-            .binary_search_by(|key| {
-                let (key_data, _) = NodeInner::deconstruct_value(&key);
-
-                key_data.cmp(&search_key)
+            .binary_search_by_key(&search_key, |p| {
+                let (key, _) = NodeInner::deconstruct_value(&p);
+                key
             })
-            .unwrap();
+            .unwrap_or_else(|x| x);
 
         Ok(idx)
     }
@@ -192,7 +196,7 @@ impl NodeInner {
     pub fn find_and_update_key(
         search_key: NodeKey,
         update_key: NodeKey,
-        vec: &mut Vec<NodeKey>,
+        vec: &mut Vec<NodeKey>
     ) -> anyhow::Result<()> {
         let idx = NodeInner::find_key(search_key, vec)?;
         vec[idx] = update_key;

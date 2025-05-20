@@ -135,6 +135,7 @@ impl Codec {
     pub fn encode(node: &NodeInner) -> anyhow::Result<TreePage> {
         let is_root = node.is_root;
         let pointer = node.pointer;
+
         let next = node.next_pointer;
 
         let mut raw: Vec<u8> = vec![0; PAGE_SIZE];

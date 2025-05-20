@@ -1,12 +1,9 @@
 #![allow(unused_variables)] // TODO(you): remove this lint after implementing this mod
 #![allow(dead_code)] // TODO(you): remove this lint after implementing this mod
 
-use crate::index::tree::{byte_box::ByteBox, index_types::NodeKey};
+use crate::index::tree::{ byte_box::ByteBox, index_types::NodeKey };
 
-use super::{
-    node_type::{NodeType, PagePointer},
-    tree_node_inner::{GuidePostNode, NodeInner},
-};
+use super::{ node_type::{ NodeType, PagePointer }, tree_node_inner::{ GuidePostNode, NodeInner } };
 
 impl GuidePostNode {
     /// Removes a key from an internal node
@@ -14,9 +11,11 @@ impl GuidePostNode {
         let (search_data, discard) = NodeInner::deconstruct_value(&search);
 
         if discard.is_some() {
-            return Err(anyhow::Error::msg(
-                "Invalid Node Key Type.Kv node where Guidepost should be present",
-            ));
+            return Err(
+                anyhow::Error::msg(
+                    "Invalid Node Key Type.Kv node where Guidepost should be present"
+                )
+            );
         }
         let node_type = self.node_type.clone();
         match self.node_type {
@@ -53,7 +52,7 @@ impl GuidePostNode {
     pub fn remove_inner_node_entry(
         &mut self,
         idx: usize,
-        take_right: bool,
+        take_right: bool
     ) -> anyhow::Result<(NodeKey, PagePointer)> {
         match self.node_type {
             NodeType::Internal(ref mut children, ref mut keys, _) => {
@@ -119,6 +118,7 @@ impl GuidePostNode {
         match self.node_type {
             NodeType::Internal(_, _, _) => {
                 self.insert_key(key)?;
+
                 self.insert_child_pointer(child)?;
 
                 Ok(())

@@ -28,15 +28,13 @@ impl BPTree {
 
         leaf_node.insert_entry(entry.clone())?;
 
-        if leaf_node.get_key_array_length() <= self.b {
+        if leaf_node.get_key_array_length() < 2 * self.b {
             let leaf_page = Codec::encode(&leaf_node)?;
             self.flusher.pop_flush_test(leaf_page.get_data())?;
             self.flusher.release_ex()?;
 
             return Ok(());
         } else {
-            println!("Full: implement Split");
-
             self.propogate_upwards(leaf_node)?;
             self.flusher.release_ex()?;
             return Ok(());
