@@ -563,7 +563,6 @@ impl BPTree {
             let mut current_node = self.codec.decode(&TreePage::new(data)).unwrap();
 
             current_node.insert_sibling_node(median.clone(), sibling.pointer)?;
-            println!("Checkpoint 1");
 
             // Insert into current with no split
             if current_node.get_key_array_length() < 2 * self.b {
@@ -577,8 +576,6 @@ impl BPTree {
 
                 return Ok(());
             }
-
-            println!("Checkpoint 2");
 
             // insert into current and split
             was_root = current_node.is_root;
@@ -598,7 +595,7 @@ impl BPTree {
             }
 
             if was_root {
-                self.new_root(median.clone(), node.pointer, sibling.pointer);
+                self.new_root(median.clone(), current_node.pointer, sibling.pointer);
             }
         }
     }

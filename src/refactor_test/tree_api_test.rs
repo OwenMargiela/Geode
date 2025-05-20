@@ -23,7 +23,7 @@ pub mod test {
         for (idx, key) in key_vec.into_iter().enumerate() {
             tree.insert(key).unwrap();
 
-            if idx == 5 {
+            if idx == 9 {
                 break;
             }
         }

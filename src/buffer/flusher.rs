@@ -212,7 +212,11 @@ impl Flusher {
         if context.stack.try_read().unwrap().len() > 0 {
             let id = context.stack.try_write().unwrap().pop_front().unwrap();
 
-            self.write_all(page_id, data)?;
+            if id == page_id {
+                self.write_all(page_id, data)?;
+            } else {
+                println!("Not equal");
+            }
         }
 
         self.lock_table.remove(&page_id).unwrap();
