@@ -116,7 +116,7 @@ impl Flusher {
                     lock.ticker.fetch_add(1, Ordering::SeqCst);
                 }
                 _ => {
-                    dbg!("");
+                    dbg!(page_id);
                     self.log_transaction(page_id);
                     return Err(anyhow::Error::msg("EX lock has already been granted"));
                 }
@@ -215,11 +215,11 @@ impl Flusher {
             if id == page_id {
                 self.write_all(page_id, data)?;
             } else {
-                println!("Not equal");
+                panic!("Mismatch  ids: Expected {} found {}", id, page_id);
             }
+            self.lock_table.remove(&id).unwrap();
         }
 
-        self.lock_table.remove(&page_id).unwrap();
         Ok(())
     }
 
@@ -259,12 +259,16 @@ impl Flusher {
         let context = &self.context;
         let stack = context.stack.try_read().unwrap();
         if stack.len() > 0 {
-            let data = stack.get(stack.len().wrapping_sub(2)).unwrap();
+            let data: &u32;
+            if stack.len() >= 2 {
+                data = stack.get(1).unwrap();
+            } else {
+                data = stack.get(0).unwrap();
+            }
 
             let gaurd = self.inner.read_page(self.file, data.clone());
             let data = gaurd.get_frame().data;
             drop(gaurd);
-            
 
             return Ok(data);
         }
@@ -303,6 +307,26 @@ impl Flusher {
         }
 
         Ok(())
+    }
+
+    pub fn get_stack(&self) {
+        println!("{:?}", self.context.stack);
+    }
+
+    pub fn read_index(&self, idx: usize) -> anyhow::Result<[u8; PAGE_SIZE]> {
+        let context = &self.context;
+        let stack = context.stack.try_read().unwrap();
+        if stack.len() > idx {
+            let data = stack.get(idx).unwrap();
+
+            let gaurd = self.inner.read_page(self.file, data.clone());
+            let data = gaurd.get_frame().data;
+            drop(gaurd);
+
+            return Ok(data);
+        }
+
+        return Err(anyhow::Error::msg("Invalid stack len"));
     }
 
     pub fn log_transaction(&self, page_id: u32) {

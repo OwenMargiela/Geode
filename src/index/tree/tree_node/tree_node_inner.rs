@@ -21,6 +21,7 @@ pub enum Node {
     LeafNode(KvNode),
 }
 
+#[derive(Debug)]
 pub struct PopResult {
     pub(crate) pop_key: NodeKey,
     pub(crate) promotion_key: NodeKey,

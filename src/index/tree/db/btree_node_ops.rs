@@ -84,7 +84,7 @@ impl NodeInner {
         separator_key: NodeKey
     ) -> anyhow::Result<()> {
         let promotion_key: NodeKey;
-        let is_leaf = current_parent_node.is_leaf;
+
         let node_type = &mut current_parent_node.node_type;
 
         // Guide Post Key array in the parent node
@@ -109,17 +109,18 @@ impl NodeInner {
                 }
 
                 // Update the separator key
-
+                // println!("Separator {:?}", separator_key);
                 NodeInner::find_and_update_key(separator_key, promotion_key, &mut key_vec)?;
                 return anyhow::Ok(());
             }
             NodeType::Internal(_, _, _) => {
                 if is_left {
+                    // println!("Left");
                     // Remove the right most value
                     let popped = current_candidate.pop_back()?;
 
                     // Set promotion key
-                    promotion_key = popped.promotion_key;
+                    promotion_key = popped.pop_key;
                     self.insert_child_pointer(popped.child_pointer.unwrap())?;
                     self.insert_key(separator_key.clone())?;
                 } else {
@@ -127,12 +128,15 @@ impl NodeInner {
 
                     // Remove the left most value
 
-                    promotion_key = popped.promotion_key;
+                    // println!("{:?}", popped);
+                    promotion_key = popped.pop_key;
                     self.insert_child_pointer(popped.child_pointer.unwrap())?;
                     self.insert_key(separator_key.clone())?;
                 }
 
                 // Update the separator key
+                // println!("Separator {:?}", separator_key);
+                // println!("Promoter {:?}", promotion_key);
                 NodeInner::find_and_update_key(separator_key, promotion_key, &mut key_vec)?;
 
                 return Ok(());

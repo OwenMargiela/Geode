@@ -44,6 +44,7 @@ impl KvNode {
 
         match self.node_type {
             NodeType::Leaf(ref mut entries, _, _) => {
+              
                 let idx = entries
                     .binary_search_by(|entry| {
                         let (key, _) = NodeInner::deconstruct_value(entry);
@@ -51,7 +52,13 @@ impl KvNode {
                     })
                     .unwrap_or_else(|x| x);
 
-                entries.remove(idx);
+                if let Some(entry) = entries.get(idx) {
+                    if entry.to_kv_pair().unwrap().key == *key {
+                        let entry = entries.remove(idx);
+                    } else {
+                        return Err(anyhow::Error::msg("Mismatch nodes"));
+                    }
+                }
 
                 Ok(())
             }

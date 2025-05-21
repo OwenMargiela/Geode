@@ -3,14 +3,25 @@
 
 use crate::storage::page::b_plus_tree_page::BTreePage;
 use crate::storage::page::btree_page_layout::{
-    FromByte, INTERNAL_NODE_HEADER_SIZE, INTERNAL_NODE_NUM_CHILDREN_OFFSET, IS_ROOT_OFFSET,
-    KEY_SIZE, LEAF_NODE_HEADER_SIZE, LEAF_NODE_NUM_PAIRS_OFFSET, NEXT_LEAF_POINTER_OFFSET,
-    NEXT_LEAF_POINTER_SIZE, NODE_TYPE_OFFSET, POINTER_OFFSET, POINTER_SIZE, PTR_SIZE,
-    ROW_ID_SEGMENT_SIZE, VALUE_SIZE,
+    FromByte,
+    INTERNAL_NODE_HEADER_SIZE,
+    INTERNAL_NODE_NUM_CHILDREN_OFFSET,
+    IS_ROOT_OFFSET,
+    KEY_SIZE,
+    LEAF_NODE_HEADER_SIZE,
+    LEAF_NODE_NUM_PAIRS_OFFSET,
+    NEXT_LEAF_POINTER_OFFSET,
+    NEXT_LEAF_POINTER_SIZE,
+    NODE_TYPE_OFFSET,
+    POINTER_OFFSET,
+    POINTER_SIZE,
+    PTR_SIZE,
+    ROW_ID_SEGMENT_SIZE,
+    VALUE_SIZE,
 };
 
 use super::errors::Error;
-use super::node_type::{Key, KeyValuePair, NextPointer, NodeType, PageId, RowID};
+use super::node_type::{ Key, KeyValuePair, NextPointer, NodeType, PageId, RowID };
 
 /// NodeKeys are either guideposts in an internal node, or the actual kv pair in the leaf
 pub enum NodeKey {
@@ -55,15 +66,16 @@ impl Node {
         let node_type = self.node_type.clone();
 
         match node_type {
-            NodeType::Leaf(_, next, _) => match next.0 {
-                Some(raw) => {
-                    let mut dst = [0u8; 8];
-                    dst.copy_from_slice(&raw);
+            NodeType::Leaf(_, next, _) =>
+                match next.0 {
+                    Some(raw) => {
+                        let mut dst = [0u8; 8];
+                        dst.copy_from_slice(&raw);
 
-                    Ok(dst)
+                        Ok(dst)
+                    }
+                    None => Err(Error::UnexpectedError),
                 }
-                None => Err(Error::UnexpectedError),
-            },
             _ => Err(Error::UnexpectedError),
         }
     }
@@ -74,7 +86,7 @@ impl Node {
         let data = BTreePage::try_from(&clone)?;
         let mut buf = data.get_data();
 
-        let range = NEXT_LEAF_POINTER_OFFSET..(NEXT_LEAF_POINTER_OFFSET + NEXT_LEAF_POINTER_SIZE);
+        let range = NEXT_LEAF_POINTER_OFFSET..NEXT_LEAF_POINTER_OFFSET + NEXT_LEAF_POINTER_SIZE;
 
         if buf.len() < NEXT_LEAF_POINTER_OFFSET + NEXT_LEAF_POINTER_SIZE {
             return Err(Error::UnexpectedError);
@@ -152,7 +164,7 @@ impl Node {
                     Node::new(
                         NodeType::Internal(sibling_children, sibling_keys, PageId(u64::default())),
                         PageId(u64::default()),
-                        false,
+                        false
                     ),
                 ))
             }
@@ -170,7 +182,7 @@ impl Node {
                     Node::new(
                         NodeType::Leaf(sibling_pair, NextPointer(None), PageId(u64::default())),
                         PageId(u64::default()),
-                        false,
+                        false
                     ),
                 ))
             }
@@ -249,9 +261,7 @@ impl Node {
     pub fn find_key_index_in_leaf(&self, key: &Key) -> usize {
         match &self.node_type {
             NodeType::Leaf(entries, _, _) => {
-                let entry = entries
-                    .binary_search_by_key(&key.0, |pair| pair.key)
-                    .unwrap();
+                let entry = entries.binary_search_by_key(&key.0, |pair| pair.key).unwrap();
                 entry
             }
             _ => 0,
@@ -282,7 +292,9 @@ impl Node {
 
                 let idx = match was_found {
                     Ok(idx) => idx,
-                    Err(_) => return Err(Error::KeyNotFound),
+                    Err(_) => {
+                        return Err(Error::KeyNotFound);
+                    }
                 };
 
                 match entries.get(idx) {
@@ -290,7 +302,7 @@ impl Node {
                         return {
                             println!("Printing error");
                             Err(Error::KeyNotFound)
-                        }
+                        };
                     }
                     Some(entry) => {
                         return Ok(entry.clone());
@@ -306,9 +318,7 @@ impl Node {
         match self.node_type {
             NodeType::Leaf(ref mut entries, _, _) => {
                 let key = entry.key;
-                let idx = entries
-                    .binary_search_by_key(&key, |p| p.key)
-                    .unwrap_or_else(|x| x);
+                let idx = entries.binary_search_by_key(&key, |p| p.key).unwrap_or_else(|x| x);
 
                 if Some(&entry) == entries.get(idx) {
                     return Err(Error::KeyAlreadyExists);
@@ -327,9 +337,7 @@ impl Node {
     pub fn remove_entry(&mut self, key: &Key) -> Result<(), Error> {
         match self.node_type {
             NodeType::Leaf(ref mut entries, _, _) => {
-                let idx = entries
-                    .binary_search_by_key(key, |p| Key(p.key))
-                    .unwrap_or_else(|x| x);
+                let idx = entries.binary_search_by_key(key, |p| Key(p.key)).unwrap_or_else(|x| x);
 
                 entries.remove(idx);
 
@@ -388,7 +396,7 @@ impl Node {
     pub fn remove_key_at_index(
         &mut self,
         idx: usize,
-        take_right: bool,
+        take_right: bool
     ) -> Result<(Key, PageId), Error> {
         match self.node_type {
             NodeType::Internal(ref mut children, ref mut keys, _) => {
@@ -424,7 +432,10 @@ impl Node {
         match &self.node_type {
             NodeType::Internal(_, keys, _) => {
                 let len = keys.len();
-                let promotion_key = keys.get(len - 1).unwrap().clone();
+                let promotion_key = keys
+                    .get(len - 1)
+                    .unwrap()
+                    .clone();
                 let (key, page_id) = self.remove_key_at_index(0, false)?;
 
                 return Ok((
@@ -435,7 +446,10 @@ impl Node {
             }
             NodeType::Leaf(entries, _, _) => {
                 let len = entries.len();
-                let promotion_key = entries.get(len - 1).unwrap().clone();
+                let promotion_key = entries
+                    .get(len - 1)
+                    .unwrap()
+                    .clone();
                 let entry = self.remove_key_value_at_index(0)?;
 
                 return Ok((
@@ -453,7 +467,6 @@ impl Node {
     pub fn pop_back(&mut self) -> Result<(NodeKey, NodeKey, Option<PageId>), Error> {
         match self.node_type {
             NodeType::Internal(_, ref mut keys, _) => {
-                println!("\n\nKeys in pop back{:?}", keys);
                 let len = keys.len();
 
                 let promotion_key = keys.get(0).unwrap().clone();
@@ -466,7 +479,6 @@ impl Node {
                 ));
             }
             NodeType::Leaf(ref mut entries, _, _) => {
-                println!("\n\nEntries in pop back{:?}", entries);
                 let len = entries.len();
                 let promotion_key = entries.get(0).unwrap().clone();
                 let entry = self.remove_key_value_at_index(len)?;
@@ -502,7 +514,7 @@ impl Node {
         current_parent_node: &mut Node,
         current_candidate: &mut Node,
         is_left: bool,
-        separator_key: Key,
+        separator_key: Key
     ) -> Result<(), Error> {
         match self.node_type {
             NodeType::Leaf(_, _, _) => {
@@ -549,6 +561,7 @@ impl Node {
                 }
 
                 // Update the separator key
+                println!("Separator {:?}", separator_key);
                 current_parent_node.find_and_update_key(separator_key, promotion_key)?;
 
                 return Ok(());
@@ -556,6 +569,7 @@ impl Node {
             NodeType::Internal(_, _, _) => {
                 let promotion_key: Key;
                 if is_left {
+                    println!("Left");
                     let popped = current_candidate.pop_back()?;
 
                     // Remove the right most value
@@ -598,12 +612,16 @@ impl Node {
                 }
 
                 // Update the separator key
+                println!("Separator {:?}", separator_key);
+                println!("Promoter {:?}", promotion_key);
                 current_parent_node.find_and_update_key(separator_key, promotion_key)?;
 
                 // Write updates to disk
                 return Ok(());
             }
-            _ => return Err(Error::UnexpectedError),
+            _ => {
+                return Err(Error::UnexpectedError);
+            }
         }
     }
     /// merges the sibling node into self, it assumes the following:
@@ -621,8 +639,11 @@ impl Node {
                         .cloned()
                         .collect();
 
-                    let mut merged_keys: Vec<Key> =
-                        keys.iter().chain(sibling_keys.iter()).cloned().collect();
+                    let mut merged_keys: Vec<Key> = keys
+                        .iter()
+                        .chain(sibling_keys.iter())
+                        .cloned()
+                        .collect();
 
                     // Is not viable for large sets
                     merged_pointers.sort();
@@ -683,11 +704,13 @@ impl TryFrom<BTreePage> for Node {
         let is_root = raw[IS_ROOT_OFFSET].from_byte();
         let pointer: Option<PageId>;
 
-        pointer = Some(PageId(u64::from_le_bytes(
-            page.get_ptr_from_offset(POINTER_OFFSET, POINTER_SIZE)
-                .try_into()
-                .unwrap(),
-        )));
+        pointer = Some(
+            PageId(
+                u64::from_le_bytes(
+                    page.get_ptr_from_offset(POINTER_OFFSET, POINTER_SIZE).try_into().unwrap()
+                )
+            )
+        );
 
         match node_type {
             NodeType::Internal(mut children, mut keys, _) => {
@@ -710,11 +733,13 @@ impl TryFrom<BTreePage> for Node {
                     keys.push(Key(key_raw.try_into().unwrap()));
                 }
 
-                Ok(Node::new(
-                    NodeType::Internal(children, keys, pointer.unwrap()),
-                    pointer.unwrap(),
-                    is_root,
-                ))
+                Ok(
+                    Node::new(
+                        NodeType::Internal(children, keys, pointer.unwrap()),
+                        pointer.unwrap(),
+                        is_root
+                    )
+                )
             }
 
             NodeType::Leaf(mut pairs, _, _) => {
@@ -738,23 +763,28 @@ impl TryFrom<BTreePage> for Node {
 
                     page_id.copy_from_slice(&value[0..ROW_ID_SEGMENT_SIZE]);
 
-                    slot_index
-                        .copy_from_slice(&value[ROW_ID_SEGMENT_SIZE..ROW_ID_SEGMENT_SIZE + 4]);
+                    slot_index.copy_from_slice(
+                        &value[ROW_ID_SEGMENT_SIZE..ROW_ID_SEGMENT_SIZE + 4]
+                    );
 
-                    let row_id =
-                        RowID::new(u32::from_le_bytes(page_id), u32::from_le_bytes(slot_index));
+                    let row_id = RowID::new(
+                        u32::from_le_bytes(page_id),
+                        u32::from_le_bytes(slot_index)
+                    );
                     offset += VALUE_SIZE;
 
                     // Trim leading or trailing zeros.
                     let key = u64::from_le_bytes(key_raw[0..PTR_SIZE].try_into().unwrap());
-                    pairs.push(KeyValuePair::new(key, row_id))
+                    pairs.push(KeyValuePair::new(key, row_id));
                 }
 
-                Ok(Node::new(
-                    NodeType::Leaf(pairs, NextPointer(Some(next_pointer)), pointer.unwrap()),
-                    pointer.unwrap(),
-                    is_root,
-                ))
+                Ok(
+                    Node::new(
+                        NodeType::Leaf(pairs, NextPointer(Some(next_pointer)), pointer.unwrap()),
+                        pointer.unwrap(),
+                        is_root
+                    )
+                )
             }
 
             NodeType::Unexpected => {

@@ -49,7 +49,7 @@ impl BPTree {
         let leaf_node_page = &TreePage::new(self.flusher.read_top()?);
 
         let mut leaf_node = self.codec.decode(leaf_node_page)?;
-        let leaf_pointer = leaf_node.pointer;
+        let mut leaf_pointer = leaf_node.pointer;
 
         leaf_node.remove_entry(&search.clone().to_guide_post()?)?;
 
@@ -61,13 +61,11 @@ impl BPTree {
 
             return Ok(());
         } else {
-            println!("Should borrow");
-
             let parent_page = TreePage::new(self.flusher.read_parent()?);
             let parent = self.codec.decode(&parent_page)?;
 
             self.borrow_if_needed(parent, leaf_node, leaf_pointer)?;
-            
+
             self.flusher.release_ex_all()?;
 
             return Ok(());

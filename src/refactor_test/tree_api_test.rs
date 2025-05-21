@@ -50,14 +50,18 @@ pub mod test {
         for key in key_vec.clone().into_iter() {
             tree.insert(key).unwrap();
         }
+        let mut idx = 1;
 
-        for (idx, key) in key_vec.clone().into_iter().enumerate() {
+        for key in key_vec.clone().into_iter() {
             let key = NodeKey::GuidePost(key.key);
+            println!("Key {:?}", key.to_guide_post().unwrap());
+
             tree.delete(key).unwrap();
 
-            if idx == 2 {
+            if idx == 9 {
                 break;
             }
+            idx += 1;
         }
 
         tree.print();

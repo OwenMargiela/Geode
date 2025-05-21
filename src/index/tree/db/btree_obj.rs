@@ -6,7 +6,10 @@ use std::{ cell::RefCell, collections::VecDeque, sync::Arc };
 use anyhow::Ok;
 
 use crate::{
-    buffer::{ buffer_pool_manager::{ BufferPoolManager, FileId }, flusher::{ Flusher, Lock } },
+    buffer::{
+        buffer_pool_manager::{ BufferPoolManager, FileId },
+        flusher::{ self, Flusher, Lock },
+    },
     index::tree::{
         byte_box::DataType,
         index_types::{ KeyValuePair, NodeKey },
@@ -311,7 +314,7 @@ impl BPTree {
         &self,
         parent: &NodeInner,
         child_id: PagePointer
-    ) -> anyhow::Result<(NodeInner, bool, NodeKey)> {
+    ) -> anyhow::Result<(NodeInner, bool, NodeKey, bool)> {
         match &parent.node_type {
             NodeType::Internal(children, keys, _) => {
                 let node_idx = match children.binary_search(&child_id) {
@@ -326,20 +329,23 @@ impl BPTree {
                 let candidate_index = node_idx + 1;
 
                 let candidate: NodeInner;
+                let can_borrow: bool;
 
                 if let Some(id) = children.get(candidate_index) {
                     let page = self.flusher.read_drop(*id);
 
                     candidate = self.codec.decode(&TreePage::new(page))?;
+                    can_borrow = candidate.can_borrow(self.b);
                 } else {
                     let id = children.get(node_idx - 1).unwrap();
                     is_left = true;
 
                     let page = self.flusher.read_drop(*id);
                     candidate = self.codec.decode(&TreePage::new(page))?;
+                    can_borrow = candidate.can_borrow(self.b);
                 }
 
-                return Ok((candidate, is_left, separator_key.clone()));
+                return Ok((candidate, is_left, separator_key.clone(), can_borrow));
             }
 
             _ => {
@@ -348,24 +354,31 @@ impl BPTree {
         };
     }
 
-    pub(crate) fn 
-    borrow_if_needed(
+    pub(crate) fn borrow_if_needed(
         &self,
         parent: NodeInner,
         child_node: NodeInner,
         child_id: PagePointer
         // mut context: Context,
     ) -> anyhow::Result<()> {
-        let (candidate, is_left, separator) = self.get_candidate(&parent, child_id)?;
+        println!("Finding candidatee");
+
+        let (mut candidate, mut is_left, mut separator, mut can_borrow) = self.get_candidate(
+            &parent,
+            child_node.pointer
+        )?;
 
         let mut current_node = child_node;
         let mut current_candidate = candidate;
-        let mut parent_id = parent.pointer.clone();
-
         let mut current_parent_node = parent;
 
+        // println!("\n\n\nParent {:? }", current_parent_node);
+        // println!("\n\n\nCurrent {:? }", current_node);
+        // println!("\n\n\nCandidate {:? }", current_candidate);
+
         loop {
-            if current_candidate.can_borrow(self.b) {
+            if can_borrow {
+                // println!("Yes");
                 current_node.borrow(
                     &mut current_parent_node,
                     &mut current_candidate,
@@ -373,11 +386,14 @@ impl BPTree {
                     separator.clone()
                 )?;
 
-                self.flusher.pop_flush(Codec::encode(&current_node).unwrap().get_data(), child_id)?;
+                self.flusher.pop_flush(
+                    Codec::encode(&current_node).unwrap().get_data(),
+                    current_node.pointer
+                )?;
 
                 self.flusher.pop_flush(
                     Codec::encode(&current_parent_node).unwrap().get_data(),
-                    parent_id
+                    current_parent_node.pointer
                 )?;
 
                 let candidate_id = current_candidate.pointer;
@@ -387,15 +403,10 @@ impl BPTree {
                     candidate_id
                 )?;
 
-                println!("Borrowed");
                 return Ok(());
             }
 
-            println!("Pre Merge Candidate {:?}\n\n", current_node);
-
             current_node.merge(&current_candidate)?;
-
-            println!("Post merge {:?}\n\n", current_node);
 
             match current_node.node_type {
                 NodeType::Internal(_, _, _) => {
@@ -404,42 +415,64 @@ impl BPTree {
                 _ => {}
             }
 
-            println!("Pre Merge Remove {:?}\n\n", current_parent_node);
-
             current_parent_node.remove_sibling_node(separator.clone(), current_candidate.pointer)?;
 
-            println!("Post Remove {:?}\n\n", current_parent_node);
+            println!("\n\nCurrent {:?}\n\n", current_parent_node);
 
-            self.flusher.pop_flush(Codec::encode(&current_node).unwrap().get_data(), child_id)?;
+            if current_parent_node.is_root && current_parent_node.child_ptr_len() < self.b {
+                current_node.is_root = true;
+                current_parent_node.is_root = false;
 
-            self.flusher.pop_flush(
-                Codec::encode(&current_parent_node).unwrap().get_data(),
-                parent_id
-            )?;
+                *self.root_page_id.borrow_mut() = current_node.pointer;
 
-            let candidate_id = current_candidate.pointer;
+                self.flusher.pop_flush(
+                    Codec::encode(&current_node).unwrap().get_data(),
+                    current_node.pointer
+                )?;
 
-            self.flusher.write_flush(
-                Codec::encode(&current_candidate).unwrap().get_data(),
-                candidate_id
-            )?;
-
-            if current_parent_node.get_key_array_length() >= self.b - 1 {
-                println!("End");
+                self.flusher.pop_flush(
+                    Codec::encode(&current_parent_node).unwrap().get_data(),
+                    current_parent_node.pointer
+                )?;
                 return Ok(());
             } else {
-                println!("Nope");
-                current_node = current_parent_node.clone();
+                self.flusher.pop_flush(
+                    Codec::encode(&current_node).unwrap().get_data(),
+                    current_node.pointer
+                )?;
+            }
 
-                let page = self.flusher.read_top()?;
+            if current_parent_node.get_key_array_length() >= self.b - 1 {
+                self.flusher.pop_flush(
+                    Codec::encode(&current_parent_node).unwrap().get_data(),
+                    current_parent_node.pointer
+                )?;
+
+                let candidate_id = current_candidate.pointer;
+
+                self.flusher.write_flush(
+                    Codec::encode(&current_candidate).unwrap().get_data(),
+                    candidate_id
+                )?;
+
+                return Ok(());
+            } else {
+                current_node = current_parent_node.clone();
+                self.flusher.get_stack();
+                let page = self.flusher.read_parent()?;
 
                 let parent = self.codec.decode(&TreePage::new(page))?;
 
-                let (candidate, is_left, separator) = self.get_candidate(&parent, child_id)?;
+                println!("\n\nParent {:?} ", parent);
+
+                println!("\n\nCurrent  {:?} ", current_node);
+
+                (candidate, is_left, separator, can_borrow) = self.get_candidate(
+                    &parent,
+                    current_node.pointer
+                )?;
 
                 current_candidate = candidate;
-
-                parent_id = current_parent_node.pointer.clone();
 
                 current_parent_node = parent;
             }

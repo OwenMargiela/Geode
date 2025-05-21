@@ -36,7 +36,7 @@ impl GuidePostNode {
         let node_type = self.node_type.clone();
         match self.node_type {
             NodeType::Internal(_, ref mut keys, _) => {
-                let idx = NodeInner::binary_search_in_key(&key, &keys)?;
+                let idx = keys.binary_search(&key).unwrap_or_else(|x| x);
 
                 keys.insert(idx, key);
                 Ok(())
@@ -105,7 +105,7 @@ impl GuidePostNode {
                 let idx = children.binary_search(&child).unwrap_or_else(|x| x);
                 let dat = children.remove(idx);
 
-                println!("Removed this {}", dat);
+             
 
                 Ok(())
             }
