@@ -49,11 +49,14 @@ impl BPTree {
         let leaf_node_page = &TreePage::new(self.flusher.read_top()?);
 
         let mut leaf_node = self.codec.decode(leaf_node_page)?;
-        let mut leaf_pointer = leaf_node.pointer;
+        let leaf_pointer = leaf_node.pointer;
 
         leaf_node.remove_entry(&search.clone().to_guide_post()?)?;
 
         if leaf_node.get_key_array_length() >= self.b - 1 || leaf_node.is_root {
+            if leaf_node.is_root {
+                leaf_node.next_pointer = None;
+            }
             let leaf_page = Codec::encode(&leaf_node)?;
             self.flusher.pop_flush_test(leaf_page.get_data())?;
 

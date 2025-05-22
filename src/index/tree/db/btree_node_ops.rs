@@ -85,6 +85,8 @@ impl NodeInner {
     ) -> anyhow::Result<()> {
         let promotion_key: NodeKey;
 
+        println!("Is Left {:?}", is_left);
+
         let node_type = &mut current_parent_node.node_type;
 
         // Guide Post Key array in the parent node
@@ -93,8 +95,10 @@ impl NodeInner {
         match self.node_type {
             NodeType::Leaf(_, _, _) => {
                 if is_left {
+                    println!("Checpoint 1");
                     // Remove the right most value
                     let popped = current_candidate.pop_back()?;
+                    println!("Checpoint 2");
 
                     // Set promotion key
                     self.insert_entry(popped.pop_key.to_kv_pair().unwrap())?;

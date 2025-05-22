@@ -44,7 +44,6 @@ impl KvNode {
 
         match self.node_type {
             NodeType::Leaf(ref mut entries, _, _) => {
-              
                 let idx = entries
                     .binary_search_by(|entry| {
                         let (key, _) = NodeInner::deconstruct_value(entry);
@@ -73,6 +72,7 @@ impl KvNode {
     pub fn remove_key_value_at_index(&mut self, idx: usize) -> anyhow::Result<NodeKey> {
         match self.node_type {
             NodeType::Leaf(ref mut entries, _, _) => {
+                println!("Removal index {}", idx);
                 let entry = entries.remove(idx);
 
                 Ok(entry)

@@ -17,6 +17,83 @@ pub struct ByteBox {
     pub data_length: u8,
 }
 
+#[derive(Debug)]
+enum ByteValue<'a> {
+    I64(i64),
+    F32(f32),
+    Bool(bool),
+    Str(&'a str),
+    None,
+}
+
+impl<'a> PartialEq for ByteValue<'a> {
+    fn eq(&self, other: &Self) -> bool {
+        use ByteValue::*;
+        match (self, other) {
+            (I64(a), I64(b)) => a == b,
+            (F32(a), F32(b)) => a == b,
+            (Bool(a), Bool(b)) => a == b,
+            (Str(a), Str(b)) => a == b,
+            (None, None) => true,
+            _ => false,
+        }
+    }
+}
+
+impl<'a> Eq for ByteValue<'a> {}
+
+impl<'a> PartialOrd for ByteValue<'a> {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        use ByteValue::*;
+        match (self, other) {
+            (I64(a), I64(b)) => Some(a.cmp(b)),
+            (F32(a), F32(b)) => a.partial_cmp(b),
+            (Bool(a), Bool(b)) => Some(a.cmp(b)),
+            (Str(a), Str(b)) => Some(a.cmp(b)),
+            (None, None) => Some(Ordering::Equal),
+            _ => Option::None,
+        }
+    }
+}
+
+impl<'a> Ord for ByteValue<'a> {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.partial_cmp(other).unwrap_or(Ordering::Equal)
+    }
+}
+
+impl ByteBox {
+    fn to_value(&self) -> ByteValue {
+        use ByteValue::*;
+        let mut rdr = Cursor::new(&self.data);
+
+        match self.datatype {
+            DataType::BigInt => rdr.read_i64::<LittleEndian>().map(I64).unwrap_or(None),
+            DataType::Int =>
+                rdr
+                    .read_i32::<LittleEndian>()
+                    .map(|v| I64(v as i64))
+                    .unwrap_or(None),
+            DataType::SmallInt =>
+                rdr
+                    .read_i16::<LittleEndian>()
+                    .map(|v| I64(v as i64))
+                    .unwrap_or(None),
+            DataType::Decimal => rdr.read_f32::<LittleEndian>().map(F32).unwrap_or(None),
+            DataType::Boolean => {
+                if self.data.len() == 1 { Bool(self.data[0] != 0) } else { None }
+            }
+            DataType::Char(_) | DataType::Varchar(_) => {
+                match std::str::from_utf8(&self.data) {
+                    Ok(s) => Str(s),
+                    Err(_) => None,
+                }
+            }
+            DataType::None => None,
+        }
+    }
+}
+
 impl ByteBox {
     pub fn new(data: Bytes, datatype: DataType) -> ByteBox {
         let len = data.len();
@@ -75,7 +152,6 @@ impl ByteBox {
         let len = varchar_bytes.len();
 
         if len > charlen {
-            
             panic!("String Upperbound crossed");
         }
 
@@ -105,19 +181,18 @@ impl PartialEq for ByteBox {
 
 impl Eq for ByteBox {}
 
-// Implementing `PartialOrd` for partial ordering
 impl PartialOrd for ByteBox {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        if self.datatype != other.datatype { None } else { self.data.partial_cmp(&other.data) }
+        if self.datatype != other.datatype {
+            return None;
+        }
+        Some(self.to_value().cmp(&other.to_value()))
     }
 }
 
 impl Ord for ByteBox {
     fn cmp(&self, other: &Self) -> Ordering {
-        match self.datatype.cmp(&other.datatype) {
-            Ordering::Equal => self.data.cmp(&other.data),
-            other => other,
-        }
+        self.partial_cmp(other).unwrap_or(Ordering::Equal)
     }
 }
 

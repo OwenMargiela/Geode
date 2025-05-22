@@ -481,7 +481,8 @@ impl Node {
             NodeType::Leaf(ref mut entries, _, _) => {
                 let len = entries.len();
                 let promotion_key = entries.get(0).unwrap().clone();
-                let entry = self.remove_key_value_at_index(len)?;
+                println!("\n\n\nRemoval index {}", len - 1);
+                let entry = self.remove_key_value_at_index(len - 1)?;
 
                 return Ok((
                     NodeKey::KeyValuePair(entry),

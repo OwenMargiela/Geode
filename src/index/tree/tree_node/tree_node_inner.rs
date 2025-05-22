@@ -111,7 +111,10 @@ impl NodeInner {
             NodeType::Internal(_, ref mut keys, _) => {
                 let len = keys.len();
 
-                let promotion_key = keys.get(0).unwrap().clone();
+                let promotion_key = keys
+                    .get(len - 1)
+                    .unwrap()
+                    .clone();
                 let (key, page_id) = self.remove_inner_node_entry(len - 1, true)?;
 
                 let (promotion_key, _) = NodeInner::deconstruct_value(&promotion_key);
@@ -126,10 +129,14 @@ impl NodeInner {
             NodeType::Leaf(ref mut entries, _, _) => {
                 let len = entries.len();
 
-                let promotion_key = entries.get(0).unwrap().clone();
+                let promotion_key = entries
+                    .get(len - 1)
+                    .unwrap()
+                    .clone();
                 let (promotion_key, _) = NodeInner::deconstruct_value(&promotion_key);
 
-                let entry = self.remove_key_value_at_index(len)?;
+                println!("Promotion key {:?}", promotion_key);
+                let entry = self.remove_key_value_at_index(len - 1)?;
                 let (key, value) = NodeInner::deconstruct_value(&entry);
 
                 let kv_pair = KeyValuePair {

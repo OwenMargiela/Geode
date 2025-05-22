@@ -23,11 +23,7 @@ pub mod test {
         let key_vec = get_kv_vec();
 
         for (idx, key) in key_vec.into_iter().enumerate() {
-            tree.insert(key).unwrap();
-
-            if idx == 14 {
-                break;
-            }
+            tree.insert(key.clone()).unwrap();
         }
 
         tree.print();
@@ -52,16 +48,15 @@ pub mod test {
         }
         let mut idx = 1;
 
-        for key in key_vec.clone().into_iter() {
+        for key in key_vec.clone().into_iter().rev() {
             let key = NodeKey::GuidePost(key.key);
-            println!("Key {:?}", key.to_guide_post().unwrap());
 
             tree.delete(key).unwrap();
 
-            if idx == 9 {
-                break;
-            }
-            idx += 1;
+            // if idx == 13 {
+            //     break;
+            // }
+            // idx += 1;
         }
 
         tree.print();
@@ -136,6 +131,66 @@ pub mod test {
             KeyValuePair {
                 key: ByteBox::small_int(150),
                 value: ByteBox::varchar("Headcliff", 15),
+            },
+            KeyValuePair {
+                key: ByteBox::small_int(160),
+                value: ByteBox::varchar("Stephanie", 15),
+            },
+            KeyValuePair {
+                key: ByteBox::small_int(170),
+                value: ByteBox::varchar("Tyresse", 15),
+            },
+            KeyValuePair {
+                key: ByteBox::small_int(180),
+                value: ByteBox::varchar("Riven", 15),
+            },
+            KeyValuePair {
+                key: ByteBox::small_int(190),
+                value: ByteBox::varchar("Annie", 15),
+            },
+            KeyValuePair {
+                key: ByteBox::small_int(200),
+                value: ByteBox::varchar("Diamond", 15),
+            },
+            KeyValuePair {
+                key: ByteBox::small_int(210),
+                value: ByteBox::varchar("Aneesia", 15),
+            },
+            KeyValuePair {
+                key: ByteBox::small_int(220),
+                value: ByteBox::varchar("Ashna", 15),
+            },
+            KeyValuePair {
+                key: ByteBox::small_int(230),
+                value: ByteBox::varchar("Leah", 15),
+            },
+            KeyValuePair {
+                key: ByteBox::small_int(240),
+                value: ByteBox::varchar("Matthew", 15),
+            },
+            KeyValuePair {
+                key: ByteBox::small_int(250),
+                value: ByteBox::varchar("Nashua", 15),
+            },
+            KeyValuePair {
+                key: ByteBox::small_int(260),
+                value: ByteBox::varchar("Van", 15),
+            },
+            KeyValuePair {
+                key: ByteBox::small_int(270),
+                value: ByteBox::varchar("Gabby", 15),
+            },
+            KeyValuePair {
+                key: ByteBox::small_int(280),
+                value: ByteBox::varchar("Tarun", 15),
+            },
+            KeyValuePair {
+                key: ByteBox::small_int(290),
+                value: ByteBox::varchar("Abby", 15),
+            },
+            KeyValuePair {
+                key: ByteBox::small_int(300),
+                value: ByteBox::varchar("Roshaun", 15),
             }
         ]
     }

@@ -259,7 +259,7 @@ impl BPTree {
                     if *entries.get(index).unwrap() == search {
                         return Ok(current_node);
                     } else {
-                        return Err(anyhow::Error::msg("Unexpected error"));
+                        return Err(anyhow::Error::msg("Node not present"));
                     }
                 }
                 _ => {
@@ -361,8 +361,6 @@ impl BPTree {
         child_id: PagePointer
         // mut context: Context,
     ) -> anyhow::Result<()> {
-        println!("Finding candidatee");
-
         let (mut candidate, mut is_left, mut separator, mut can_borrow) = self.get_candidate(
             &parent,
             child_node.pointer
@@ -372,13 +370,9 @@ impl BPTree {
         let mut current_candidate = candidate;
         let mut current_parent_node = parent;
 
-        // println!("\n\n\nParent {:? }", current_parent_node);
-        // println!("\n\n\nCurrent {:? }", current_node);
-        // println!("\n\n\nCandidate {:? }", current_candidate);
-
         loop {
             if can_borrow {
-                // println!("Yes");
+                println!("Yes");
                 current_node.borrow(
                     &mut current_parent_node,
                     &mut current_candidate,
@@ -416,8 +410,6 @@ impl BPTree {
             }
 
             current_parent_node.remove_sibling_node(separator.clone(), current_candidate.pointer)?;
-
-            println!("\n\nCurrent {:?}\n\n", current_parent_node);
 
             if current_parent_node.is_root && current_parent_node.child_ptr_len() < self.b {
                 current_node.is_root = true;
@@ -462,10 +454,6 @@ impl BPTree {
                 let page = self.flusher.read_parent()?;
 
                 let parent = self.codec.decode(&TreePage::new(page))?;
-
-                println!("\n\nParent {:?} ", parent);
-
-                println!("\n\nCurrent  {:?} ", current_node);
 
                 (candidate, is_left, separator, can_borrow) = self.get_candidate(
                     &parent,
@@ -564,7 +552,8 @@ impl BPTree {
     ) -> anyhow::Result<()> {
         let mut was_root = node.is_root;
 
-        let (median, mut sibling) = node.split(self.b).unwrap();
+        let (mut median, mut sibling) = node.split(self.b).unwrap();
+
         // New func to set pointer
         sibling.next_pointer = None;
 
@@ -579,13 +568,16 @@ impl BPTree {
         let mut data: [u8; PAGE_SIZE];
 
         {
-            data = Codec::encode(&node).unwrap().get_data();
-            self.flusher.pop_flush(data, page_pointer)?;
+            data = Codec::encode(&sibling).unwrap().get_data();
+            self.flusher.write_flush(data, sibling.pointer)?;
         }
 
         {
-            data = Codec::encode(&sibling).unwrap().get_data();
-            self.flusher.write_flush(data, sibling.pointer)?;
+            data = Codec::encode(&node).unwrap().get_data();
+            self.flusher.pop_flush(data, node.pointer)?;
+
+            let test = self.flusher.read_drop(node.pointer);
+            let test_node = self.codec.decode(&TreePage::new(test))?;
         }
 
         if was_root {
@@ -602,8 +594,8 @@ impl BPTree {
                     return Ok(());
                 }
             };
-            let mut current_node = self.codec.decode(&TreePage::new(data)).unwrap();
 
+            let mut current_node = self.codec.decode(&TreePage::new(data)).unwrap();
             current_node.insert_sibling_node(median.clone(), sibling.pointer)?;
 
             // Insert into current with no split
@@ -622,7 +614,7 @@ impl BPTree {
             // insert into current and split
             was_root = current_node.is_root;
 
-            let (median, mut sibling) = current_node.split(self.b).unwrap();
+            (median, sibling) = current_node.split(self.b).unwrap();
 
             // New func to set pointer
             sibling.pointer = self.flusher.new_page();

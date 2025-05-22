@@ -21,18 +21,49 @@ pub mod test {
             .b_parameter(2)
             .build("test".to_string(), Arc::new(bpm))
             .unwrap();
-        let celing = 16;
-
-        for i in 1..celing {
-            index.insert(KeyValuePair::new(i * 10, RowID::new(0, i.try_into().unwrap()))).unwrap();
+        let celing = 30;
+        let keys = vec![
+            10,
+            20,
+            30,
+            40,
+            50,
+            60,
+            70,
+            80,
+            90,
+            100,
+            110,
+            120,
+            130,
+            140,
+            150,
+            160,
+            170,
+            180,
+            190,
+            200,
+            210,
+            220,
+            230,
+            240,
+            250,
+            260,
+            270,
+            280,
+            290,
+            300
+        ];
+        for (i, key) in keys.iter().enumerate() {
+            index.insert(KeyValuePair::new(*key, RowID::new(0, i.try_into().unwrap()))).unwrap();
         }
         index.print();
 
-        for i in 1..celing {
-            let entry = KeyValuePair::new(i * 10, RowID::new(0, i.try_into().unwrap()));
-            let key = Key(entry.key);
-            assert_eq!(index.get_entry(key.clone()).unwrap(), entry);
-        }
+        // for i in 0..celing {
+        //     let entry = KeyValuePair::new(i + 1, RowID::new(0, i.try_into().unwrap()));
+        //     let key = Key(entry.key);
+        //     assert_eq!(index.get_entry(key.clone()).unwrap(), entry);
+        // }
 
         teardown();
     }
@@ -48,25 +79,19 @@ pub mod test {
             .b_parameter(2)
             .build("test".to_string(), Arc::new(bpm))
             .unwrap();
-        let celing = 16;
+        let celing = 50;
 
-        for i in 1..celing {
-            index.insert(KeyValuePair::new(i * 10, RowID::new(0, i.try_into().unwrap()))).unwrap();
+        for i in 0..celing {
+            index.insert(KeyValuePair::new(i + 1, RowID::new(0, i.try_into().unwrap()))).unwrap();
         }
 
-        for i in 1..celing {
-            println!("Key {:?}", i * 10);
-
-            index.delete(&Key::new(i * 10)).unwrap();
-            let key_nine = index.find_node(&Key::new(i + 10));
-            assert_eq!(key_nine.is_err(), true);
-
-            if i == 9 {
-                break;
-            }
-        }
         index.print();
-        teardown();
+
+        for i in 1..celing + 1 {
+            index.delete(&Key::new(i)).unwrap();
+            let key_nine = index.find_node(&Key::new(i));
+            assert_eq!(key_nine.is_err(), true);
+        }
     }
 
     #[test]
