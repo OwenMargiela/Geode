@@ -4,10 +4,7 @@ use std::sync::Arc;
 
 use crate::{
     buffer::buffer_pool_manager::BufferPoolManager,
-    index::{
-        node::Node,
-        node_type::{Key, KeyValuePair},
-    },
+    index::{ node::Node, node_type::{ Key, KeyValuePair } },
     storage::page::b_plus_tree_page::BTreePage,
 };
 
@@ -25,6 +22,7 @@ pub struct LeafNodeIterator {
 impl LeafNodeIterator {
     pub fn get_page(&self, next_page: u32) -> Node {
         let page_guard = self.bpm_instance.read_page(self.file_id, next_page);
+
         let page = BTreePage::new(page_guard.get_frame().data);
         let node = Node::try_from(page).unwrap();
 
@@ -37,7 +35,7 @@ impl LeafNodeIterator {
         bpm_instance: Arc<BufferPoolManager>,
         file_id: u64,
         page: Arc<Node>,
-        search_key: Key,
+        search_key: Key
     ) -> Self {
         let current_key = match page.find_key_value(&search_key) {
             Ok(key) => Some(key),
@@ -58,7 +56,7 @@ impl LeafNodeIterator {
     pub fn create_and_seek_to_first(
         bpm_instance: Arc<BufferPoolManager>,
         file_id: u64,
-        page: Arc<Node>,
+        page: Arc<Node>
     ) -> Self {
         let current_key = match page.get_key_value_at_index(0) {
             Ok(key) => Some(key),
@@ -73,7 +71,6 @@ impl LeafNodeIterator {
             index: 0,
         }
     }
-    
 }
 
 impl StorageIterator for LeafNodeIterator {
@@ -114,7 +111,7 @@ impl StorageIterator for LeafNodeIterator {
             *self = LeafNodeIterator::create_and_seek_to_first(
                 self.bpm_instance.clone(),
                 self.file_id,
-                Arc::new(node),
+                Arc::new(node)
             );
 
             return Ok(());

@@ -48,15 +48,18 @@ pub mod test {
         }
         let mut idx = 1;
 
-        for key in key_vec.clone().into_iter().rev() {
-            let key = NodeKey::GuidePost(key.key);
+        let (left, right) = key_vec.split_at(key_vec.len().wrapping_div(2));
 
+        println!("Left {:?}", left);
+
+        for key in left.into_iter().rev() {
+            let key = NodeKey::GuidePost(key.key.clone());
             tree.delete(key).unwrap();
+        }
 
-            // if idx == 13 {
-            //     break;
-            // }
-            // idx += 1;
+        for key in right.clone().into_iter().rev() {
+            let key = NodeKey::GuidePost(key.key.clone());
+            tree.delete(key).unwrap();
         }
 
         tree.print();
