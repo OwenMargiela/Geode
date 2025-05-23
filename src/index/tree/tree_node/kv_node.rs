@@ -87,8 +87,12 @@ impl KvNode {
     pub fn get_key_value_at(&self, idx: usize) -> anyhow::Result<KeyValuePair> {
         match self.node_type {
             NodeType::Leaf(ref entries, _, _) => {
-                if let NodeKey::KeyValuePair(kv) = NodeInner::get_key_at_index(idx, &entries)? {
-                    return Ok(kv);
+                let entry = entries.get(idx);
+
+                if entry.is_some() {
+                    return Ok(entry.unwrap().to_kv_pair().unwrap().clone());
+                } else {
+                    return Err(anyhow::Error::msg("Unexpected Error"));
                 }
             }
             _ => {}

@@ -111,19 +111,21 @@ impl StorageIterator for LeafIterator {
             return Ok(());
         }
 
-        let next_page = self.page.next_pointer.unwrap();
+        let next_page = self.page.next_pointer;
 
-        if next_page > 0 {
-            let node = self.get_page(next_page);
+        if let Some(next_page) = next_page {
+            if next_page > 0 {
+                let node = self.get_page(next_page);
 
-            *self = LeafIterator::create_and_seek_to_first(
-                self.flusher.clone(),
-                Arc::new(node),
-                self.codec.clone(),
-                self.file_id
-            );
+                *self = LeafIterator::create_and_seek_to_first(
+                    self.flusher.clone(),
+                    Arc::new(node),
+                    self.codec.clone(),
+                    self.file_id
+                );
+                return Ok(());
+            }
         }
-
         return Err(anyhow::Error::msg("Cannot Advance"));
     }
 }

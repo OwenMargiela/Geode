@@ -22,7 +22,7 @@ pub enum WriteOperation {
 }
 
 pub struct BPTree {
-    pub flusher: Flusher,
+    pub flusher: Arc<Flusher>,
     pub root_page_id: RefCell<PagePointer>,
 
     pub index_id: FileId,
@@ -88,7 +88,7 @@ impl BTreeBuilder {
         flusher.write_flush(root_page_data.get_data(), page_pointer)?;
 
         Ok(BPTree {
-            flusher,
+            flusher: Arc::new(flusher),
             root_page_id: RefCell::new(page_pointer),
             index_id: file_id,
             b: self.b.clone(),
@@ -253,7 +253,10 @@ impl BPTree {
                 NodeType::Leaf(entries, _, _) => {
                     let index = NodeInner::find_key(search.clone(), &entries)?;
 
-                    if *entries.get(index).unwrap() == search {
+                    if
+                        entries.get(index).unwrap().to_kv_pair().unwrap().key ==
+                        search.to_guide_post().unwrap()
+                    {
                         return Ok(current_node);
                     } else {
                         return Err(anyhow::Error::msg("Node not present"));

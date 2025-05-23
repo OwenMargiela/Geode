@@ -159,11 +159,11 @@ impl GuidePostNode {
         return Err(anyhow::Error::msg("Unexpected Error"));
     }
 
-    pub fn get_key_idx(&self, search: NodeKey) -> anyhow::Result<usize> {
+    pub fn get_key_idx(&self, search: &NodeKey) -> anyhow::Result<usize> {
         let node_type = self.node_type.clone();
         match self.node_type {
             NodeType::Internal(_, ref keys, _) => {
-                let idx = NodeInner::find_key(search, &keys);
+                let idx = NodeInner::find_key(search.clone(), &keys);
 
                 return idx;
             }
