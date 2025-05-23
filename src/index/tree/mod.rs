@@ -5,3 +5,4 @@ pub mod db;
 pub mod index_types;
 pub mod tree_page;
 pub mod tree_schema;
+pub mod iterators;

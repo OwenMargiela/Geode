@@ -97,11 +97,11 @@ impl KvNode {
         return Err(anyhow::Error::msg("Unexpected Error"));
     }
 
-    pub fn get_key_value(&self, search: NodeKey) -> anyhow::Result<KeyValuePair> {
+    pub fn get_key_value(&self, search: &NodeKey) -> anyhow::Result<KeyValuePair> {
         let node_type = self.node_type.clone();
         match self.node_type {
             NodeType::Leaf(ref entries, _, _) => {
-                let idx = NodeInner::find_key(search, entries)?;
+                let idx = NodeInner::find_key(search.clone(), entries)?;
 
                 if let NodeKey::KeyValuePair(kv) = NodeInner::get_key_at_index(idx, &entries)? {
                     return Ok(kv);
@@ -113,11 +113,11 @@ impl KvNode {
         return Err(anyhow::Error::msg("Unexpected Error"));
     }
 
-    pub fn get_key_value_index(&self, search: NodeKey) -> anyhow::Result<usize> {
+    pub fn get_key_value_index(&self, search: &NodeKey) -> anyhow::Result<usize> {
         let node_type = self.node_type.clone();
         match self.node_type {
             NodeType::Leaf(ref entries, _, _) => {
-                let idx = NodeInner::find_key(search, entries);
+                let idx = NodeInner::find_key(search.clone(), entries);
                 return idx;
             }
             _ => {}

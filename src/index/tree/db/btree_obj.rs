@@ -6,10 +6,7 @@ use std::{ cell::RefCell, collections::VecDeque, sync::Arc };
 use anyhow::Ok;
 
 use crate::{
-    buffer::{
-        buffer_pool_manager::{ BufferPoolManager, FileId },
-        flusher::{ self, Flusher, Lock },
-    },
+    buffer::{ buffer_pool_manager::{ BufferPoolManager, FileId }, flusher::{ Flusher, Lock } },
     index::tree::{
         byte_box::DataType,
         index_types::{ KeyValuePair, NodeKey },

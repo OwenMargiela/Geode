@@ -22,7 +22,7 @@ pub mod test {
 
         let key_vec = get_kv_vec();
 
-        for (idx, key) in key_vec.into_iter().enumerate() {
+        for (_, key) in key_vec.into_iter().enumerate() {
             tree.insert(key.clone()).unwrap();
         }
 
@@ -46,7 +46,7 @@ pub mod test {
         for key in key_vec.clone().into_iter() {
             tree.insert(key).unwrap();
         }
-        let mut idx = 1;
+        let idx = 1;
 
         let (left, right) = key_vec.split_at(key_vec.len().wrapping_div(2));
 
