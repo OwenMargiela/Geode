@@ -1,21 +1,17 @@
 #[cfg(test)]
-
 pub mod test {
-    use std::{
-        fs::{remove_dir_all, remove_file},
-        path::PathBuf,
-    };
+    use std::{ fs::{ remove_dir_all, remove_file }, path::PathBuf };
 
     use crate::{
         buffer::buffer_pool_manager::BufferPoolManager,
-        storage::{disk::manager::Manager, page::page::page_constants::PAGE_SIZE},
+        index::tree::tree_page::tree_page_layout::PAGE_SIZE,
+        storage::disk::manager::Manager,
     };
 
     const NUM_FRAMES: usize = 10;
     const K_DIST: usize = 2;
 
     #[test]
-
     fn disable_drop_test() {
         let (log_io, log_file_path) = Manager::open_log();
 

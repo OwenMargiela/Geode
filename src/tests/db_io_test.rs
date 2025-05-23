@@ -1,14 +1,11 @@
 #[cfg(test)]
 pub mod test {
+    use std::{ fs::{ remove_dir_all, remove_file }, path::PathBuf };
 
-    use std::{
-        fs::{remove_dir_all, remove_file},
-        path::PathBuf,
+    use crate::{
+        index::tree::tree_page::tree_page_layout::PAGE_SIZE,
+        storage::disk::manager::Manager,
     };
-
-    use crate::storage::disk::manager::Manager;
-
-    use crate::storage::page::page::page_constants::PAGE_SIZE;
 
     #[test]
     fn db_io_test() {
@@ -25,16 +22,13 @@ pub mod test {
 
         let (page_id, _) = manager.allocate_page(file_id);
         manager.write_page(file_id, page_id, &page_data).unwrap();
-        manager
-            .read_page(file_id, page_id, &mut page_buffer)
-            .expect("Failed to read page");
+        manager.read_page(file_id, page_id, &mut page_buffer).expect("Failed to read page");
 
         assert_eq!(page_data, page_buffer, "Page read mismatch!");
         println!("{:?}", page_buffer);
         teardown();
     }
 
-   
     fn teardown() {
         let log_file_path = PathBuf::from("log_file_path.bin");
         let db_path = PathBuf::from("geodeData");

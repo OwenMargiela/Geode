@@ -2,22 +2,19 @@
 #![allow(dead_code)] // TODO(you): remove this lint after implementing this mod
 
 use std::{
-    alloc::{alloc, Layout},
-    collections::{HashMap, VecDeque},
-    fs::{File, OpenOptions},
-    io::{Read, Seek, SeekFrom, Write},
+    alloc::{ alloc, Layout },
+    collections::{ HashMap, VecDeque },
+    fs::{ File, OpenOptions },
+    io::{ Read, Seek, SeekFrom, Write },
     os::unix::fs::OpenOptionsExt,
-    path::{Path, PathBuf},
+    path::{ Path, PathBuf },
     slice,
-    sync::{
-        atomic::{AtomicBool, AtomicU64},
-        Arc,
-    },
+    sync::{ atomic::{ AtomicBool, AtomicU64 }, Arc },
 };
 
 use hashlink::LinkedHashMap;
 
-use crate::{storage::page::page::page_constants::PAGE_SIZE, utils::fdpool::FdPool};
+use crate::{ index::tree::tree_page::tree_page_layout::PAGE_SIZE, utils::fdpool::FdPool };
 
 // eventually put all constants in a a designated file
 const O_DIRECT: i32 = 0x4000;
@@ -51,7 +48,7 @@ pub struct Manager {
     // Might be replaced by a table within the system catalogue
     // file_map: HashMap<u64, PathBuf>,
     // Pool of open file descriptors
-    file_descriptors: FdPool,          // File ID → File Descriptor Pool
+    file_descriptors: FdPool, // File ID → File Descriptor Pool
     files: HashMap<u64, FileMetadata>, // File ID → File Metadata (Pages & Free Slots)
     flush_logs: Arc<AtomicBool>,
 
@@ -109,10 +106,9 @@ impl Manager {
         &mut self,
         file_id: u64,
         page_id: u32,
-        page_data: &[u8],
+        page_data: &[u8]
     ) -> Result<(), String> {
-        let file_meta = self
-            .files
+        let file_meta = self.files
             .get_mut(&file_id)
             .ok_or_else(|| format!("File {} not found", file_id))?;
 
@@ -132,15 +128,11 @@ impl Manager {
             }
         };
 
-        if offset % PAGE_SIZE as u64 != 0 {
-            return Err(format!(
-                "Invalid write offset {} (must be 4KB aligned)",
-                offset
-            ));
+        if offset % (PAGE_SIZE as u64) != 0 {
+            return Err(format!("Invalid write offset {} (must be 4KB aligned)", offset));
         }
 
-        let mut db_io = self
-            .file_descriptors
+        let mut db_io = self.file_descriptors
             .get(file_id)
             .ok_or_else(|| format!("File descriptor for {} not found", file_id))?;
 
@@ -152,9 +144,7 @@ impl Manager {
             .write_all(&page_data)
             .map_err(|err| format!("I/O error while writing page {}: {}", page_id, err))?;
 
-        db_io
-            .flush()
-            .map_err(|err| format!("Error flushing page {}: {}", page_id, err))?;
+        db_io.flush().map_err(|err| format!("Error flushing page {}: {}", page_id, err))?;
 
         Ok(())
     }
@@ -163,28 +153,27 @@ impl Manager {
         &mut self,
         file_id: u64,
         page_id: u32,
-        page_data: &mut [u8],
+        page_data: &mut [u8]
     ) -> Result<(), String> {
-        let file_meta = self
-            .files
+        let file_meta = self.files
             .get_mut(&file_id)
             .ok_or_else(|| format!("File {} not found", file_id))?;
 
         let offset = match file_meta.pages.get(&page_id) {
             Some(Some(offset)) => *offset,
-            Some(None) => return Err(String::from("Page has been deallocated")),
-            None => return Err(String::from("Page has not been allocated")),
+            Some(None) => {
+                return Err(String::from("Page has been deallocated"));
+            }
+            None => {
+                return Err(String::from("Page has not been allocated"));
+            }
         };
 
-        if offset % PAGE_SIZE as u64 != 0 {
-            return Err(format!(
-                "Invalid write offset {} (must be 4KB aligned)",
-                offset
-            ));
+        if offset % (PAGE_SIZE as u64) != 0 {
+            return Err(format!("Invalid write offset {} (must be 4KB aligned)", offset));
         }
 
-        let mut db_io = self
-            .file_descriptors
+        let mut db_io = self.file_descriptors
             .get(file_id)
             .ok_or_else(|| format!("File descriptor for {} not found", file_id))?;
 
@@ -200,8 +189,7 @@ impl Manager {
     }
 
     pub fn delete_page(&mut self, file_id: u64, page_id: u32) -> Result<(), String> {
-        let file_meta = self
-            .files
+        let file_meta = self.files
             .get_mut(&file_id)
             .ok_or_else(|| format!("File {} not found", file_id))?;
 
@@ -211,7 +199,9 @@ impl Manager {
                     file_meta.pages.replace(page_id, None);
                     file_meta.free_slots.push_front((page_id, offset));
                 }
-                None => return Err(format!("Page already deallocated in db file")),
+                None => {
+                    return Err(format!("Page already deallocated in db file"));
+                }
             }
         } else {
             return Err(format!("Page not allocated in db file"));
@@ -246,11 +236,7 @@ impl Manager {
             .append(true)
             .open(&log_file_path)
             .or_else(|_| {
-                OpenOptions::new()
-                    .read(true)
-                    .write(true)
-                    .create(true)
-                    .open(&log_file_path)
+                OpenOptions::new().read(true).write(true).create(true).open(&log_file_path)
             })
             .unwrap();
 
@@ -260,9 +246,7 @@ impl Manager {
     pub fn create_db_file(&mut self) -> Result<(u64, PathBuf), i8> {
         std::fs::create_dir_all("geodeData/base").unwrap();
 
-        let oid = self
-            .mono_id
-            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let oid = self.mono_id.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         let path_string = format!("geodeData/base/{}.bin", oid);
         let path = Path::new(&path_string);
 
@@ -276,13 +260,10 @@ impl Manager {
 
         let file_ino = self.file_descriptors.set(new_file).0.ok_or(-1)?;
         // self.file_map.insert(file_ino, path.to_path_buf());
-        self.files.insert(
-            file_ino,
-            FileMetadata {
-                pages: LinkedHashMap::new(),
-                free_slots: VecDeque::new(),
-            },
-        );
+        self.files.insert(file_ino, FileMetadata {
+            pages: LinkedHashMap::new(),
+            free_slots: VecDeque::new(),
+        });
 
         Ok((file_ino, path.to_path_buf()))
     }

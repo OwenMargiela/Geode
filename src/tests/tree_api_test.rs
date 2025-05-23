@@ -46,7 +46,6 @@ pub mod test {
         for key in key_vec.clone().into_iter() {
             tree.insert(key).unwrap();
         }
-        let idx = 1;
 
         let (left, right) = key_vec.split_at(key_vec.len().wrapping_div(2));
 
@@ -57,7 +56,7 @@ pub mod test {
             tree.delete(key).unwrap();
         }
 
-        for key in right.clone().into_iter().rev() {
+        for key in right.into_iter().rev() {
             let key = NodeKey::GuidePost(key.key.clone());
             tree.delete(key).unwrap();
         }

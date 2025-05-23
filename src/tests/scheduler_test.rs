@@ -1,18 +1,8 @@
 #[cfg(test)]
 pub mod test {
-    use std::{
-        fs::{remove_dir_all, remove_file},
-        path::PathBuf,
-        sync::{Arc, Mutex},
-    };
+    use std::{ fs::{ remove_dir_all, remove_file }, path::PathBuf, sync::{ Arc, Mutex } };
 
-    use crate::storage::{
-        disk::{
-            manager::Manager,
-            scheduler::{DiskData, DiskRequest, DiskScheduler},
-        },
-        page::page::page_constants::PAGE_SIZE,
-    };
+    use crate::{index::tree::tree_page::tree_page_layout::PAGE_SIZE, storage::disk::{ manager::Manager, scheduler::{ DiskData, DiskRequest, DiskScheduler } }};
 
     #[tokio::main]
     #[test]
@@ -22,12 +12,7 @@ pub mod test {
         let scheduler = DiskScheduler::new(Arc::clone(&manager));
         let future_one = scheduler.create_future();
 
-        let (file_id, _) = scheduler
-            .manager
-            .lock()
-            .unwrap()
-            .create_db_file()
-            .expect("File made");
+        let (file_id, _) = scheduler.manager.lock().unwrap().create_db_file().expect("File made");
 
         // Lock contention allow for functionality to check if a page needs to be allocated thats automatic
         let mut gurad = scheduler.manager.lock().unwrap();

@@ -7,10 +7,7 @@ use anyhow::Ok;
 
 use dashmap::DashMap;
 
-use crate::{
-    index::tree::tree_node::node_type::PagePointer,
-    storage::page::btree_page_layout::PAGE_SIZE,
-};
+use crate::index::tree::{tree_node::node_type::PagePointer, tree_page::tree_page_layout::PAGE_SIZE};
 
 use super::buffer_pool_manager::BufferPoolManager;
 

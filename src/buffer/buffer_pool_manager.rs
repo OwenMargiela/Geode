@@ -1,32 +1,26 @@
 #![allow(unused_variables)] // TODO(you): remove this lint after implementing this mod
 #![allow(dead_code)] // TODO(you): remove this lint after implementing this mod
 
-use std::{
-    collections::HashMap,
-    sync::{
-        atomic::{AtomicU32, Ordering},
-        Arc, Mutex, RwLock,
-    },
-};
+use std::{ collections::HashMap, sync::{ atomic::{ AtomicU32, Ordering }, Arc, Mutex, RwLock } };
 
 use crossbeam_queue::SegQueue;
 use dashmap::DashMap;
 use hashlink::LinkedHashMap;
 
 use crate::{
-    index::btree::Protocol,
+    index::tree::tree_page::tree_page_layout::PAGE_SIZE,
     storage::{
-        disk::{
-            manager::Manager,
-            scheduler::{DiskData, DiskRequest, DiskScheduler},
-        },
-        page::{
-            page::page_constants::PAGE_SIZE,
-            page_guard::{FrameGuard, PageGuard, ReadGuard, WriteGuard},
-        },
+        disk::{ manager::Manager, scheduler::{ DiskData, DiskRequest, DiskScheduler } },
+        page::page_guard::{ FrameGuard, PageGuard, ReadGuard, WriteGuard },
     },
-    utils::replacer::{LRUKReplacer, Replacer},
+    utils::replacer::{ LRUKReplacer, Replacer },
 };
+
+#[derive(Clone, Copy)]
+pub enum Protocol {
+    Exclusive, // Pesimistic crabbing. Exclusive / Write latches upon tree descent
+    Shared, // Optimistic crabbing. Shared / Read latches upon tree descent
+}
 
 pub type FrameId = u32;
 pub type PageId = u32;
@@ -74,8 +68,10 @@ impl BufferPoolManager {
     pub fn new(num_frames: usize, manager: Manager, k_dist: usize) -> Self {
         let manager = Arc::new(Mutex::new(manager));
 
-        let mut frames: LinkedHashMap<FrameId, Option<RwLock<FrameHeader>>> =
-            LinkedHashMap::with_capacity(num_frames);
+        let mut frames: LinkedHashMap<
+            FrameId,
+            Option<RwLock<FrameHeader>>
+        > = LinkedHashMap::with_capacity(num_frames);
 
         let free_frames: SegQueue<FrameId> = SegQueue::new();
 
@@ -135,9 +131,7 @@ impl BufferPoolManager {
         {
             let buffer: Box<[u8]> = Box::new([0; PAGE_SIZE]);
             let mut page_buffer = Manager::aligned_buffer(&buffer);
-            manager_guard
-                .write_page(file_id, page_id, &mut page_buffer)
-                .unwrap();
+            manager_guard.write_page(file_id, page_id, &mut page_buffer).unwrap();
         }
 
         drop(manager_guard);
@@ -154,18 +148,24 @@ impl BufferPoolManager {
 
         let mut page_frame_map = match page_frame_map.get_mut(&file_id) {
             Some(map) => map,
-            None => return false,
+            None => {
+                return false;
+            }
         };
 
         let frame_id = match page_frame_map.get(&page_id).and_then(|id| id.clone()) {
             Some(id) => id,
-            None => return false,
+            None => {
+                return false;
+            }
         };
 
         let mut frame_guard = self.frames.write().unwrap();
         let frame = match frame_guard.get_mut(&frame_id).and_then(|f| f.take()) {
             Some(f) => f,
-            None => return false,
+            None => {
+                return false;
+            }
         };
 
         if frame.read().unwrap().pin_count.load(Ordering::Relaxed) > 0 {
@@ -173,13 +173,7 @@ impl BufferPoolManager {
             return false;
         }
 
-        if self
-            .manager
-            .lock()
-            .unwrap()
-            .delete_page(file_id, page_id)
-            .is_ok()
-        {
+        if self.manager.lock().unwrap().delete_page(file_id, page_id).is_ok() {
             page_frame_map.insert(page_id, None);
             self.free_frames.push(frame.read().unwrap().frame_id);
             return true;
@@ -193,7 +187,7 @@ impl BufferPoolManager {
         &self,
         file_id: FileId,
         page_id: PageId,
-        access_type: Protocol,
+        access_type: Protocol
     ) -> Option<PageGuard> {
         let frame_id: Option<u32>;
 
@@ -234,11 +228,7 @@ impl BufferPoolManager {
 
             let mut frame_guard = self.frames.write().unwrap();
 
-            let frame = frame_guard
-                .get_mut(&eviction_id)
-                .unwrap()
-                .as_ref()
-                .expect("Valid frame");
+            let frame = frame_guard.get_mut(&eviction_id).unwrap().as_ref().expect("Valid frame");
 
             // Flush page to disk if dirty
             let evicted_page_guard = frame.write().unwrap();
@@ -252,7 +242,7 @@ impl BufferPoolManager {
             let res = self.flush_page_sync(
                 evicted_page_guard.file_id,
                 evicted_page_guard.page_id,
-                &page_data,
+                &page_data
             );
 
             drop(evicted_page_guard);
@@ -267,10 +257,11 @@ impl BufferPoolManager {
             // It indicates whether or not the page's data has been modified
 
             return Some(self.create_guard(eviction_id, access_type));
-        }
-        // Page has been allocated a frame
-        // Page in memory
-        else if let Some(frame_id) = frame_id {
+        } else if
+            // Page has been allocated a frame
+            // Page in memory
+            let Some(frame_id) = frame_id
+        {
             if self.frames.read().unwrap().get(&frame_id).is_some() {
                 return Some(self.create_guard(frame_id, access_type));
             }
@@ -283,7 +274,7 @@ impl BufferPoolManager {
         &self,
         file_id: u64,
         page_id: PageId,
-        frame_data: &[u8; PAGE_SIZE],
+        frame_data: &[u8; PAGE_SIZE]
     ) -> bool {
         // Does file and page exist ?
 
@@ -300,10 +291,7 @@ impl BufferPoolManager {
 
             let alingend_frame_data = Manager::aligned_buffer(frame_data);
 
-            if manager_guard
-                .write_page(file_id, page_id, &alingend_frame_data)
-                .is_ok()
-            {
+            if manager_guard.write_page(file_id, page_id, &alingend_frame_data).is_ok() {
                 return true;
             }
         }
@@ -314,7 +302,7 @@ impl BufferPoolManager {
         &self,
         file_id: FileId,
         page_id: PageId,
-        frame: &[u8],
+        frame: &[u8]
     ) -> bool {
         // Does file and page exist ?
 
@@ -358,9 +346,7 @@ impl BufferPoolManager {
 
             let buffer: Box<[u8]> = Box::new([0; PAGE_SIZE]);
             let mut page_buffer = Manager::aligned_buffer(&buffer);
-            manager
-                .read_page(file_id, page_id, &mut page_buffer)
-                .unwrap();
+            manager.read_page(file_id, page_id, &mut page_buffer).unwrap();
 
             if page_buffer.len() == PAGE_SIZE {
                 frame_data.copy_from_slice(&page_buffer);
@@ -409,17 +395,13 @@ impl BufferPoolManager {
     }
 
     pub(crate) fn write_page(&self, file_id: u64, page_id: PageId) -> WriteGuard {
-        let guard = self
-            .check_write_page(file_id, page_id)
-            .expect("Write lock error");
+        let guard = self.check_write_page(file_id, page_id).expect("Write lock error");
 
         guard
     }
 
     pub(crate) fn read_page(&self, file_id: u64, page_id: PageId) -> ReadGuard {
-        let guard = self
-            .check_read_page(file_id, page_id)
-            .expect("Read lock error");
+        let guard = self.check_read_page(file_id, page_id).expect("Read lock error");
 
         guard
     }

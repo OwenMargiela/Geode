@@ -1,10 +1,9 @@
-pub mod b_tree_node_test;
-pub mod b_tree_page_test;
 pub mod db_io_test;
-pub mod index_test;
-pub mod iterator_test;
 pub mod page_test;
 pub mod scheduler_test;
 pub mod schema_test;
-pub mod slotted_page_test;  
 pub mod tuple_test;
+pub mod flusher_test;
+pub mod codec_test;
+pub mod tree_api_test;
+pub mod iterator_test;

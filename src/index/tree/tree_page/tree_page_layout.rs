@@ -114,3 +114,16 @@ impl FromByte for u8 {
         matches!(self, 0x01)
     }
 }
+
+pub trait ToByte {
+    fn to_byte(&self) -> u8;
+}
+
+impl ToByte for bool {
+    fn to_byte(&self) -> u8 {
+        match self {
+            true => 0x01,
+            false => 0x00,
+        }
+    }
+}
