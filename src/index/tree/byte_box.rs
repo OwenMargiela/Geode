@@ -8,6 +8,8 @@ use std::{ cmp::Ordering, fmt };
 use std::io::Cursor;
 use byteorder::ReadBytesExt;
 
+use crate::catalog::schema::SchemaDataValue;
+
 #[derive(Clone)]
 pub struct ByteBox {
     pub data: Bytes,
@@ -90,6 +92,7 @@ impl ByteBox {
                 }
             }
             DataType::None => None,
+            _ => { None }
         }
     }
 }
@@ -244,6 +247,18 @@ impl fmt::Debug for ByteBox {
                     Err(_) => "Invalid UTF-8 string".to_string(),
                 }
 
+            DataType::Tuple(ref values) => {
+                let mut result = String::from("( ");
+                for val in values.iter() {
+                    result.push_str(", ");
+
+                    use std::fmt::Write as _;
+                    write!(&mut result, "{}: {:?}", val.name, val.data).ok();
+                }
+                result.push_str(" )");
+                result
+            }
+
             DataType::None => { "None".to_string() }
         };
 
@@ -267,6 +282,9 @@ pub enum DataType {
     Char(usize),
     Varchar(usize),
     Boolean,
+
+    Tuple(Vec<SchemaDataValue>),
+
     None,
 }
 
@@ -282,6 +300,7 @@ impl DataType {
                 DataType::Varchar(_) => "VARCHAR",
                 DataType::Boolean => "BOOLEAN",
                 DataType::None => "UNINITIALIZED",
+                DataType::Tuple(_) => "TUPLE",
             }
         ).to_string()
     }

@@ -17,5 +17,6 @@ tokio = { version = "1", features = ["full"] }
 dashmap = "=6.1.0"
 crossbeam-queue = "0.3.12"
 ouroboros = "=0.10.1"
+crc32fast = "=1.0.3"
 
 

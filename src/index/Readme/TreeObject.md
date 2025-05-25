@@ -33,3 +33,16 @@ impl BTree {
     DEL
     SCAN
 }
+
+
+Schemas 
+
+Table 
+    Name    | Root Page ID | Key Type | Data Type
+
+Manager
+    Mono_ID | 
+
+ Page ( In Manager )
+    Page_id | Is_Alocated | Offset in File
+

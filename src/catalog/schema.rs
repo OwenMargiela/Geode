@@ -1,169 +1,115 @@
-// #![allow(unused_variables)] // TODO(you): remove this lint after implementing this mod
-// #![allow(dead_code)] // TODO(you): remove this lint after implementing this mod
+#![allow(unused_variables)] // TODO(you): remove this lint after implementing this mod
+#![allow(dead_code)] // TODO(you): remove this lint after implementing this mod
 
-// use std::cell::RefCell;
+use crate::index::tree::byte_box::{ ByteBox, DataType };
 
-// use crate::db_types::container::{data_type_string, ByteBox};
+#[derive(Clone, Debug, PartialEq)]
+pub struct Column {
+    /// Column name. Can't be empty.
+    pub name: String,
+    /// Column datatype.
+    pub datatype: DataType,
+}
 
-// #[derive(Clone, Copy)]
+pub struct SchemaBuilder {
+    colummns: Vec<Column>,
+}
 
-// pub struct Column<'a> {
-//     pub column_name: &'a str,
-//     pub column_type: &'a str,
-// }
+pub struct Schema {
+    pub columns: Vec<Column>,
+}
 
-// impl<'a> Column<'a> {
-//     pub(crate) fn new(name: &'a str, col_type: &'a str) -> Self {
-//         let fixed_length_bool: bool;
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct SchemaDataValue {
+    pub name: String,
+    pub data: ByteBox,
+}
 
-//         Self {
-//             column_name: &name,
-//             column_type: &col_type,
-//         }
-//     }
-//     pub(crate) fn get_column_name(&self) -> &str {
-//         &self.column_name
-//     }
-//     pub(crate) fn get_column_type(&self) -> &str {
-//         &self.column_type
-//     }
-// }
+impl SchemaBuilder {
+    pub(crate) fn new() -> Self {
+        SchemaBuilder { colummns: Vec::new() }
+    }
 
-// pub struct SchemaBuilder<'a> {
-//     columns: Vec<Column<'a>>,
-// }
-// impl<'a> SchemaBuilder<'a> {
-//     pub(crate) fn new() -> Self {
-//         Self {
-//             columns: Vec::new(),
-//         }
-//     }
+    pub(crate) fn add_big_int(mut self, name: String) -> Self {
+        self.colummns.push(Column { name, datatype: DataType::BigInt });
+        self
+    }
 
-//     pub(crate) fn add_big_int(mut self, column_name: &'a str) -> Self {
-//         let schema_length = self.columns.len();
+    pub(crate) fn add_int(mut self, name: String) -> Self {
+        self.colummns.push(Column { name, datatype: DataType::Int });
+        self
+    }
 
-//         self.columns
-//             .push(Column::new(column_name, data_type_string::BIGINT));
-//         self
-//     }
+    pub(crate) fn add_small_int(mut self, name: String) -> Self {
+        self.colummns.push(Column { name, datatype: DataType::SmallInt });
+        self
+    }
 
-//     pub(crate) fn add_int(mut self, column_name: &'a str) -> Self {
-//         let schema_length = self.columns.len();
+    pub(crate) fn add_decimal(mut self, name: String) -> Self {
+        self.colummns.push(Column { name, datatype: DataType::Decimal });
+        self
+    }
 
-//         self.columns
-//             .push(Column::new(column_name, data_type_string::INT));
-//         self
-//     }
+    pub(crate) fn add_bool(mut self, name: String) -> Self {
+        self.colummns.push(Column { name, datatype: DataType::Boolean });
+        self
+    }
 
-//     pub(crate) fn add_small_int(mut self, column_name: &'a str) -> Self {
-//         let schema_length = self.columns.len();
+    pub(crate) fn add_char(mut self, name: String, size: usize) -> Self {
+        self.colummns.push(Column { name, datatype: DataType::Char(size) });
+        self
+    }
 
-//         self.columns
-//             .push(Column::new(column_name, data_type_string::SMALLINT));
-//         self
-//     }
+    pub(crate) fn add_varchar(mut self, name: String, size: usize) -> Self {
+        self.colummns.push(Column { name, datatype: DataType::Varchar(size) });
+        self
+    }
 
-//     pub(crate) fn add_decimal(mut self, column_name: &'a str) -> Self {
-//         let schema_length = self.columns.len();
+    pub(crate) fn build(mut self) -> Schema {
+        self.colummns.sort_by(|a, b| {
+            if a.datatype.to_string() == "VARCHAR" && b.datatype.to_string() != "VARCHAR" {
+                std::cmp::Ordering::Greater
+            } else if a.datatype.to_string() != "VARCHAR" && b.datatype.to_string() == "VARCHAR" {
+                std::cmp::Ordering::Less
+            } else {
+                std::cmp::Ordering::Equal
+            }
+        });
 
-//         self.columns
-//             .push(Column::new(column_name, data_type_string::DECIMAL));
-//         self
-//     }
+        Schema { columns: self.colummns }
+    }
+}
 
-//     pub(crate) fn add_boolean(mut self, column_name: &'a str) -> Self {
-//         let schema_length = self.columns.len();
+impl Schema {
+    pub(crate) fn get_col_idx(&self, col_name: String) -> Option<u8> {
+        let idx: u8;
+        for col_idx in 0..self.columns.len() {
+            let col = self.columns.get(col_idx).unwrap();
+            if col.name == col_name {
+                idx = col_idx as u8;
+                return Some(idx);
+            }
+        }
 
-//         self.columns
-//             .push(Column::new(column_name, data_type_string::BOOLEAN));
-//         self
-//     }
+        None
+    }
 
-//     pub(crate) fn add_char(mut self, column_name: &'a str, size: u8) -> Self {
-//         let schema_length = self.columns.len();
+    pub(crate) fn validate_fields(&self, values: &Vec<ByteBox>) -> bool {
+        let schema_len = self.columns.len();
 
-//         self.columns
-//             .push(Column::new(column_name, data_type_string::CHAR));
+        if schema_len != values.len() {
+            return false;
+        }
 
-//         self
-//     }
+        for i in 0..schema_len {
+            let elem = &values[i];
+            let cur_column = self.columns.get(i).unwrap();
 
-//     pub(crate) fn add_varchar(mut self, column_name: &'a str, size: u8) -> Self {
-//         let schema_length = self.columns.len();
+            if elem.datatype != cur_column.datatype {
+                return false;
+            }
+        }
 
-//         self.columns
-//             .push(Column::new(column_name, data_type_string::VARCHAR));
-
-//         self
-//     }
-
-//     pub(crate) fn build(mut self) -> Schema<'a> {
-//         let size = self.columns.len();
-
-//         // Varchar push down
-//         let num_of_vars = RefCell::new(0);
-
-//         self.columns.sort_by(|a, b| {
-//             if a.column_type == "VARCHAR" && b.column_type != "VARCHAR" {
-//                 *num_of_vars.borrow_mut() += 1;
-//                 std::cmp::Ordering::Greater
-//             } else if a.column_type != "VARCHAR" && b.column_type == "VARCHAR" {
-//                 std::cmp::Ordering::Less
-//             } else {
-//                 std::cmp::Ordering::Equal
-//             }
-//         });
-
-//         Schema {
-//             columns: self.columns,
-//             length: size,
-//             version: 0,
-//             number_of_var_length_fields: num_of_vars.take(),
-//         }
-//     }
-// }
-// pub struct Schema<'a> {
-//     pub length: usize,
-
-//     pub columns: Vec<Column<'a>>,
-//     pub version: u8,
-//     pub number_of_var_length_fields: u8,
-// }
-
-// impl<'a> Schema<'a> {
-//     pub(crate) fn get_col_idx(&self, col_name: &str) -> Option<u8> {
-//         let idx: u8;
-//         for col_idx in 0..self.columns.len() {
-//             let col = self.columns.get(col_idx).unwrap();
-//             if col.column_name == col_name {
-//                 idx = col_idx as u8;
-//                 return Some(idx);
-//             }
-//         }
-
-//         None
-//     }
-
-//     pub(crate) fn validate_fields(&self, values: &Vec<ByteBox>) -> bool {
-//         let schema_len = self.length;
-
-//         if schema_len != values.len() {
-//             return false;
-//         }
-
-//         for i in 0..schema_len {
-//             let elem = &values[i];
-//             let cur_column = self.columns[i];
-
-//             if elem.datatype != cur_column.column_type {
-//                 return false;
-//             }
-//         }
-
-//         true
-//     }
-
-//     pub fn get_columns(&self) -> &Vec<Column> {
-//         &self.columns
-//     }
-// }
+        true
+    }
+}
