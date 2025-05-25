@@ -33,7 +33,7 @@ impl Tuple {
 
                     schema_data_value.push(SchemaDataValue {
                         name: value.data.datatype.to_string(),
-                        data: value.data.clone(),
+                        data: value.data.clone()
                     });
 
                     data.put(value.data.data);
