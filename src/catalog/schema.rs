@@ -3,7 +3,7 @@
 
 use crate::index::tree::byte_box::{ ByteBox, DataType };
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Column {
     /// Column name. Can't be empty.
     pub name: String,
@@ -15,6 +15,7 @@ pub struct SchemaBuilder {
     colummns: Vec<Column>,
 }
 
+#[derive(Debug)]
 pub struct Schema {
     pub columns: Vec<Column>,
 }
@@ -25,42 +26,150 @@ pub struct SchemaDataValue {
     pub data: ByteBox,
 }
 
+pub type SchemaData = Vec<SchemaDataValue>;
+
+pub struct SchemaDataBuilder {
+    pub columns: Vec<SchemaDataValue>,
+}
+
+impl SchemaDataBuilder {
+    pub(crate) fn new() -> Self {
+        SchemaDataBuilder { columns: Vec::new() }
+    }
+
+    pub(crate) fn add_big_int(mut self, name: String, data: ByteBox) -> Self {
+        match data.datatype {
+            DataType::BigInt => {
+                self.columns.push(SchemaDataValue { name, data });
+            }
+
+            _ => panic!("Type Mismatch"),
+        }
+        self
+    }
+
+    pub(crate) fn add_int(mut self, name: String, data: ByteBox) -> Self {
+        match data.datatype {
+            DataType::Int => {
+                self.columns.push(SchemaDataValue { name, data });
+            }
+
+            _ => panic!("Type Mismatch"),
+        }
+        self
+    }
+
+    pub(crate) fn add_small_int(mut self, name: String, data: ByteBox) -> Self {
+        match data.datatype {
+            DataType::SmallInt => {
+                self.columns.push(SchemaDataValue { name, data });
+            }
+
+            _ => panic!("Type Mismatch"),
+        }
+        self
+    }
+
+    pub(crate) fn add_decimal(mut self, name: String, data: ByteBox) -> Self {
+        match data.datatype {
+            DataType::Decimal => {
+                self.columns.push(SchemaDataValue { name, data });
+            }
+
+            _ => panic!("Type Mismatch"),
+        }
+        self
+    }
+
+    pub(crate) fn add_bool(mut self, name: String, data: ByteBox) -> Self {
+        match data.datatype {
+            DataType::Boolean => {
+                self.columns.push(SchemaDataValue { name, data });
+            }
+
+            _ => panic!("Type Mismatch"),
+        }
+        self
+    }
+
+    pub(crate) fn add_char(mut self, name: String, data: ByteBox) -> Self {
+        match data.datatype {
+            DataType::Char(_) => {
+                self.columns.push(SchemaDataValue { name, data });
+            }
+
+            _ => panic!("Type Mismatch"),
+        }
+        self
+    }
+
+    pub(crate) fn add_varchar(mut self, name: String, data: ByteBox) -> Self {
+        match data.datatype {
+            DataType::Varchar(_) => {
+                self.columns.push(SchemaDataValue { name, data });
+            }
+
+            _ => panic!("Type Mismatch"),
+        }
+        self
+    }
+
+    pub(crate) fn build(mut self) -> SchemaData {
+        self.columns.sort_by(|a, b| {
+            if
+                a.data.datatype.to_string() == "VARCHAR" &&
+                b.data.datatype.to_string() != "VARCHAR"
+            {
+                std::cmp::Ordering::Greater
+            } else if
+                a.data.datatype.to_string() != "VARCHAR" &&
+                b.data.datatype.to_string() == "VARCHAR"
+            {
+                std::cmp::Ordering::Less
+            } else {
+                std::cmp::Ordering::Equal
+            }
+        });
+
+        self.columns
+    }
+}
 impl SchemaBuilder {
     pub(crate) fn new() -> Self {
         SchemaBuilder { colummns: Vec::new() }
     }
 
-    pub(crate) fn add_big_int(mut self, name: String) -> Self {
+    pub(crate) fn add_big_int(&mut self, name: String) -> &Self {
         self.colummns.push(Column { name, datatype: DataType::BigInt });
         self
     }
 
-    pub(crate) fn add_int(mut self, name: String) -> Self {
+    pub(crate) fn add_int(&mut self, name: String) -> &Self {
         self.colummns.push(Column { name, datatype: DataType::Int });
         self
     }
 
-    pub(crate) fn add_small_int(mut self, name: String) -> Self {
+    pub(crate) fn add_small_int(&mut self, name: String) -> &Self {
         self.colummns.push(Column { name, datatype: DataType::SmallInt });
         self
     }
 
-    pub(crate) fn add_decimal(mut self, name: String) -> Self {
+    pub(crate) fn add_decimal(&mut self, name: String) -> &Self {
         self.colummns.push(Column { name, datatype: DataType::Decimal });
         self
     }
 
-    pub(crate) fn add_bool(mut self, name: String) -> Self {
+    pub(crate) fn add_bool(&mut self, name: String) -> &Self {
         self.colummns.push(Column { name, datatype: DataType::Boolean });
         self
     }
 
-    pub(crate) fn add_char(mut self, name: String, size: usize) -> Self {
+    pub(crate) fn add_char(&mut self, name: String, size: usize) -> &Self {
         self.colummns.push(Column { name, datatype: DataType::Char(size) });
         self
     }
 
-    pub(crate) fn add_varchar(mut self, name: String, size: usize) -> Self {
+    pub(crate) fn add_varchar(&mut self, name: String, size: usize) -> &Self {
         self.colummns.push(Column { name, datatype: DataType::Varchar(size) });
         self
     }
