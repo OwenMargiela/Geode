@@ -1,5 +1,5 @@
-#![allow(unused_variables)] // TODO(you): remove this lint after implementing this mod
-#![allow(dead_code)] // TODO(you): remove this lint after implementing this mod
+#![allow(unused_variables)] 
+#![allow(dead_code)] 
 
 use std::{ cell::RefCell, collections::VecDeque, path::Path, sync::{ Arc, Mutex } };
 
@@ -124,6 +124,8 @@ impl BTreeBuilder {
         flusher: Arc<Flusher>,
         file_id: u64
     ) -> anyhow::Result<BPTree> {
+
+        
         let bpm = Arc::new(BufferPoolManager::new_with_arc(NUM_FRAMES, manager, K_DIST));
 
         let flusher = Flusher::new(bpm, file_id);

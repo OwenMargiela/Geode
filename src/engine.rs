@@ -1,5 +1,5 @@
-#![allow(unused_variables)] // TODO(you): remove this lint after implementing this mod
-#![allow(dead_code)] // TODO(you): remove this lint after implementing this mod
+#![allow(unused_variables)] 
+#![allow(dead_code)] 
 
 use std::{ cell::RefCell, path::Path, sync::{ Arc, Mutex } };
 
@@ -97,7 +97,7 @@ impl StorageEngine {
                 value_type: DataType::Tuple(table_schema()),
             },
             flusher: flusher.clone(),
-            index_id: 0,
+            index_id: 1,
             root_page_id: RefCell::new(1),
         });
         unimplemented!()
