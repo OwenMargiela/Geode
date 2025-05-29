@@ -1,7 +1,11 @@
 #![allow(unused_variables)] // TODO(you): remove this lint after implementing this mod
 #![allow(dead_code)] // TODO(you): remove this lint after implementing this mod
 
-use std::{ collections::HashMap, sync::{ atomic::{ AtomicU32, Ordering }, Arc, Mutex, RwLock } };
+use std::{
+    collections::HashMap,
+    path::Path,
+    sync::{ atomic::{ AtomicU32, Ordering }, Arc, Mutex, RwLock },
+};
 
 use crossbeam_queue::SegQueue;
 use dashmap::DashMap;
@@ -97,6 +101,36 @@ impl BufferPoolManager {
         }
     }
 
+    pub fn new_with_arc(num_frames: usize, manager: Arc<Mutex<Manager>>, k_dist: usize) -> Self {
+        let mut frames: LinkedHashMap<
+            FrameId,
+            Option<RwLock<FrameHeader>>
+        > = LinkedHashMap::with_capacity(num_frames);
+
+        let free_frames: SegQueue<FrameId> = SegQueue::new();
+
+        let file_page_map: DashMap<FileId, FilePageMap> = DashMap::new();
+
+        for i in 0..num_frames {
+            frames.insert(i as u32, None);
+
+            // The maximum amount of frames are all allocated at once
+
+            free_frames.push(i as u32);
+        }
+
+        Self {
+            num_frames,
+            next_page_id: AtomicU32::new(0),
+            frames: Arc::new(RwLock::new(frames)),
+            file_page_map: Arc::new(file_page_map),
+            free_frames: Arc::new(free_frames),
+            replacer: Arc::new(Mutex::new(LRUKReplacer::new(num_frames as usize, k_dist))),
+            disk_scheduler: Arc::new(Mutex::new(DiskScheduler::new(Arc::clone(&manager)))),
+            manager,
+        }
+    }
+
     // Allocates a new File on disk
 
     pub fn allocate_file(&self) -> FileId {
@@ -109,6 +143,23 @@ impl BufferPoolManager {
 
         {
             self.file_page_map.insert(file_id, HashMap::new());
+        }
+
+        file_id
+    }
+
+    pub fn open_file(&self, path: impl AsRef<Path> + std::fmt::Debug) -> FileId {
+        let manager = &self.manager;
+        let mut manager_guard = manager.lock().unwrap();
+
+        let (file_id, _) = manager_guard.open_from_db_file(path).unwrap();
+
+        drop(manager_guard);
+
+        {
+            self.file_page_map.insert(file_id, HashMap::new());
+            let mut page = self.file_page_map.get_mut(&file_id).unwrap();
+            page.insert(0, None);
         }
 
         file_id
@@ -194,7 +245,7 @@ impl BufferPoolManager {
         {
             // let file_map_guard = self.file_page_map.read().unwrap();
             let file_map = self.file_page_map.get(&file_id)?; // Error if file has not been allocated
-            frame_id = *file_map.get(&page_id).unwrap();
+            frame_id = file_map.get(&page_id).and_then(|x| *x);
         }
 
         if frame_id.is_none() {

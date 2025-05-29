@@ -20,7 +20,9 @@ impl NodeKey {
         match self {
             NodeKey::KeyValuePair(kv) => Ok(kv.clone()),
 
-            _ => return Err(anyhow::Error::msg("Unable to convert to kv pair")),
+            _ => {
+                return Err(anyhow::Error::msg("Unable to convert to kv pair"));
+            }
         }
     }
 
@@ -28,7 +30,9 @@ impl NodeKey {
         match self {
             NodeKey::GuidePost(k) => Ok(k.clone()),
 
-            _ => return Err(anyhow::Error::msg("Unable to convert to guide post key")),
+            _ => {
+                return Err(anyhow::Error::msg("Unable to convert to guide post key"));
+            }
         }
     }
 }

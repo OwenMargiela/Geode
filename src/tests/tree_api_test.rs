@@ -2,11 +2,15 @@
 pub mod test {
     use std::{ fs::{ remove_dir_all, remove_file }, path::PathBuf };
 
-    use crate::index::tree::{
-        byte_box::{ ByteBox, DataType },
-        db::btree_obj::BTreeBuilder,
-        index_types::{ KeyValuePair, NodeKey },
-        tree_page::codec::Codec,
+    use crate::{
+        catalog::schema::SchemaDataBuilder,
+        index::tree::{
+            byte_box::{ ByteBox, DataType },
+            db::btree_obj::BTreeBuilder,
+            index_types::{ KeyValuePair, NodeKey },
+            tree_page::codec::Codec,
+        },
+        storage::tuple::{ to_flat_schema, Tuple },
     };
 
     #[test]
@@ -26,6 +30,33 @@ pub mod test {
             tree.insert(key.clone()).unwrap();
         }
 
+        tree.print();
+        // teardown();
+    }
+
+    #[test]
+    fn refactor_insert_works_tuple() {
+        let tuple = Tuple::TupleData(
+            SchemaDataBuilder::new()
+                .add_big_int(String::from("Money"), ByteBox::big_int(1_000_000))
+                .add_small_int(String::from("Age"), ByteBox::small_int(25))
+                .build()
+        );
+
+        let schema = to_flat_schema(&tuple);
+
+        let tree = BTreeBuilder::new()
+            .b_parameter(2)
+            .tree_schema(Codec {
+                key_type: DataType::SmallInt,
+                value_type: DataType::Tuple(schema),
+            })
+            .build()
+            .unwrap();
+
+        let tuple_box = ByteBox::tuple(&tuple);
+
+        tree.insert(KeyValuePair { key: ByteBox::small_int(10), value: tuple_box }).unwrap();
         tree.print();
         teardown();
     }
@@ -49,8 +80,6 @@ pub mod test {
 
         let (left, right) = key_vec.split_at(key_vec.len().wrapping_div(2));
 
-        println!("Left {:?}", left);
-
         for key in left.into_iter().rev() {
             let key = NodeKey::GuidePost(key.key.clone());
             tree.delete(key).unwrap();
@@ -65,6 +94,7 @@ pub mod test {
         teardown();
     }
 
+    #[test]
     fn teardown() {
         let log_file_path = PathBuf::from("log_file_path.bin");
         let db_path = PathBuf::from("geodeData");

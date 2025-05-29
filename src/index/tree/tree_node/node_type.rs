@@ -3,7 +3,6 @@
 
 use crate::index::tree::index_types::NodeKey;
 
-
 pub type PagePointer = u32;
 
 #[derive(PartialEq, Eq, Clone, Debug)]
@@ -21,11 +20,12 @@ pub enum NodeType {
 impl From<u8> for NodeType {
     fn from(orig: u8) -> NodeType {
         match orig {
-            0x01 => NodeType::Internal(
-                Vec::<PagePointer>::new(),
-                Vec::<NodeKey>::new(),
-                u32::default(),
-            ),
+            0x01 =>
+                NodeType::Internal(
+                    Vec::<PagePointer>::new(),
+                    Vec::<NodeKey>::new(),
+                    u32::default()
+                ),
             0x02 => NodeType::Leaf(Vec::<NodeKey>::new(), u32::default(), None),
             _ => NodeType::Unexpected,
         }

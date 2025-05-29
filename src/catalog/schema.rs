@@ -1,9 +1,11 @@
 #![allow(unused_variables)] // TODO(you): remove this lint after implementing this mod
 #![allow(dead_code)] // TODO(you): remove this lint after implementing this mod
 
+use bincode::{ Decode, Encode };
+
 use crate::index::tree::byte_box::{ ByteBox, DataType };
 
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Encode, Decode, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Column {
     /// Column name. Can't be empty.
     pub name: String,
@@ -15,7 +17,7 @@ pub struct SchemaBuilder {
     colummns: Vec<Column>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Encode, Decode, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Schema {
     pub columns: Vec<Column>,
 }

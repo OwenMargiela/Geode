@@ -41,7 +41,7 @@ struct FileMetadata {
 // By right the Manager should only have to keep tracking on ensuring data is written to the
 // appropriate sector on disk. Maintaining its own internal mapping of pages to page_ids
 // isn't the most optimal solution. However, it does provide a point from which to gain
-// insights on which pages have been allocated and deallocatedy o
+// insights on which pages have been allocated and deallocatedy 
 
 pub struct Manager {
     // Mapping of inode numbers to file paths
@@ -49,6 +49,10 @@ pub struct Manager {
     // file_map: HashMap<u64, PathBuf>,
     // Pool of open file descriptors
     file_descriptors: FdPool, // File ID → File Descriptor Pool
+
+
+    // This structube will replaced by a disk persistent BPtree instance
+    
     files: HashMap<u64, FileMetadata>, // File ID → File Metadata (Pages & Free Slots)
     flush_logs: Arc<AtomicBool>,
 
@@ -188,6 +192,42 @@ impl Manager {
         Ok(())
     }
 
+    pub fn try_read_offset(
+        &mut self,
+        path: impl AsRef<Path> + std::fmt::Debug,
+        offset: u64,
+        page_data: &mut [u8]
+    ) -> anyhow::Result<()> {
+        if offset % (PAGE_SIZE as u64) != 0 {
+            return Err(
+                anyhow::Error::msg(format!("Invalid write offset {} (must be 4KB aligned)", offset))
+            );
+        }
+
+        let mut db_io = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .custom_flags(O_DIRECT)
+            .open(&path)
+            .map_err(|_| -1)
+            .unwrap();
+
+        db_io
+            .seek(SeekFrom::Start(offset))
+            .map_err(|err|
+                anyhow::Error::msg(format!("I/O error while seeking offset {}: {}", offset, err))
+            )?;
+
+        db_io
+            .read_exact(page_data)
+            .map_err(|err|
+                anyhow::Error::msg(format!("I/O error while read offset {} : {}", offset, err))
+            )?;
+
+        Ok(())
+    }
+
     pub fn delete_page(&mut self, file_id: u64, page_id: u32) -> Result<(), String> {
         let file_meta = self.files
             .get_mut(&file_id)
@@ -268,6 +308,33 @@ impl Manager {
         Ok((file_ino, path.to_path_buf()))
     }
 
-    // TODO
-    // Add a shutdown to empty  the file descriptor pool
+    pub fn open_from_db_file(
+        &mut self,
+        path: impl AsRef<Path> + std::fmt::Debug
+    ) -> anyhow::Result<(u64, PathBuf)> {
+        // let path_string = format!("geodeData/base/{}.bin", 0);
+        // let path = Path::new(&path_string);
+
+        println!("Path {:?}", path.as_ref().to_str().unwrap());
+
+        let path: &Path = Path::new(path.as_ref().to_str().unwrap());
+
+        let new_file = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .custom_flags(O_DIRECT)
+            .open(&path)
+            .map_err(|_| -1)
+            .unwrap();
+
+        let file_ino = self.file_descriptors.set(new_file).0.ok_or(-1).unwrap();
+        // self.file_map.insert(file_ino, path.to_path_buf());
+        self.files.insert(file_ino, FileMetadata {
+            pages: LinkedHashMap::new(),
+            free_slots: VecDeque::new(),
+        });
+
+        Ok((file_ino, path.to_path_buf()))
+    }
 }

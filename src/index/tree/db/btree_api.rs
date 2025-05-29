@@ -16,6 +16,17 @@ use super::btree_obj::BPTree;
 
 impl BPTree {
     pub fn insert(&self, entry: KeyValuePair) -> anyhow::Result<()> {
+        // Add real checks in the btree opps file
+        {
+            let test_entry = entry.clone();
+            let key = test_entry.key;
+            let value = test_entry.value;
+
+            if self.codec.value_type.to_string() != value.datatype.to_string() {
+                return Err(anyhow::Error::msg("Schema Mismatch"));
+            }
+        }
+
         let search_key = NodeKey::KeyValuePair(entry.clone());
 
         let context = self.tree_descent(search_key.clone(), Lock::EXLOCK, WriteOperation::Insert)?;

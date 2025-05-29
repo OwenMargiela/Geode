@@ -19,10 +19,9 @@ use crate::{
             PAGE_SIZE,
         },
     },
-
 };
 
-use super::{ page::TreePage, tree_page_layout::{ToByte, LEAF_NODE_HEADER_SIZE} };
+use super::{ page::TreePage, tree_page_layout::{ ToByte, LEAF_NODE_HEADER_SIZE } };
 
 #[derive(Clone)]
 pub struct Codec {
@@ -175,7 +174,7 @@ impl Codec {
                             return Err(anyhow::Error::msg("Unexpected Error"));
                         }
                     };
-                    // println!("{:?}", key);
+
                     let key_len = key.data_length as u32;
                     cursor.write_u32::<LittleEndian>(key_len)?;
 

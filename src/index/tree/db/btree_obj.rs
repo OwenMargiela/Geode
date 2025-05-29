@@ -1,7 +1,7 @@
 #![allow(unused_variables)] // TODO(you): remove this lint after implementing this mod
 #![allow(dead_code)] // TODO(you): remove this lint after implementing this mod
 
-use std::{ cell::RefCell, collections::VecDeque, sync::Arc };
+use std::{ cell::RefCell, collections::VecDeque, path::Path, sync::{ Arc, Mutex } };
 
 use anyhow::Ok;
 
@@ -67,12 +67,64 @@ impl BTreeBuilder {
         self
     }
 
+    pub fn build_from_file(
+        &self,
+        path: impl AsRef<Path> + std::marker::Copy + std::fmt::Debug
+    ) -> anyhow::Result<BPTree> {
+        let (log_io, log_file_path) = Manager::open_log();
+        let manager = Manager::new(log_io, log_file_path);
+
+        let bpm = Arc::new(BufferPoolManager::new(NUM_FRAMES, manager, K_DIST));
+        let file_id = bpm.open_file(path);
+
+        let flusher = Flusher::new(bpm, file_id);
+
+        Ok(BPTree {
+            flusher: Arc::new(flusher),
+            root_page_id: RefCell::new(0),
+            index_id: file_id,
+            b: self.b.clone(),
+            codec: self.table_schema.clone(),
+        })
+    }
+
     pub fn build(&self) -> anyhow::Result<BPTree> {
         let (log_io, log_file_path) = Manager::open_log();
         let manager = Manager::new(log_io, log_file_path);
 
         let bpm = Arc::new(BufferPoolManager::new(NUM_FRAMES, manager, K_DIST));
         let file_id = bpm.allocate_file();
+
+        let flusher = Flusher::new(bpm, file_id);
+
+        let page_pointer = flusher.new_page();
+        let root = NodeInner::new(
+            NodeType::Leaf(vec![], page_pointer, None),
+            true,
+            page_pointer,
+            None
+        );
+
+        let root_page_data = Codec::encode(&root)?;
+        flusher.write_flush(root_page_data.get_data(), page_pointer)?;
+
+        Ok(BPTree {
+            flusher: Arc::new(flusher),
+            root_page_id: RefCell::new(page_pointer),
+            index_id: file_id,
+            b: self.b.clone(),
+            codec: self.table_schema.clone(),
+        })
+    }
+
+    pub fn build_table(
+        &self,
+        table_name: String,
+        manager: Arc<Mutex<Manager>>,
+        flusher: Arc<Flusher>,
+        file_id: u64
+    ) -> anyhow::Result<BPTree> {
+        let bpm = Arc::new(BufferPoolManager::new_with_arc(NUM_FRAMES, manager, K_DIST));
 
         let flusher = Flusher::new(bpm, file_id);
 
@@ -270,8 +322,9 @@ impl BPTree {
     }
 
     pub(crate) fn print(&self) {
+        println!("Breakpoint 1");
         let page = self.flusher.read_drop(*self.root_page_id.borrow());
-
+        println!("Breakpoint 2");
         let parent = self.codec.decode(&TreePage::new(page)).unwrap();
         self.print_tree(&parent, 0);
     }
@@ -291,7 +344,9 @@ impl BPTree {
                 print!(" ]\n");
 
                 for child in children {
+                    println!("Breakpoint alpha");
                     let page = self.flusher.read_drop(*child);
+                    println!("Breakpoint beta");
                     let child = self.codec.decode(&TreePage::new(page)).unwrap();
                     self.print_tree(&child, depth + 1);
                 }
@@ -299,8 +354,9 @@ impl BPTree {
             NodeType::Leaf(entries, next, current) => {
                 println!("\nEntries [ ");
                 for entry in entries {
-                    let (key_bytes, value) = NodeInner::deconstruct_value(entry);
-                    print!("        Key {:?} Value {:?} \n", key_bytes, value.unwrap());
+                    if let NodeKey::KeyValuePair(entry) = entry {
+                        print!("         {:?}\n", entry);
+                    }
                 }
                 println!("\n], current {:?} next {:?} \n ", node.pointer, node.next_pointer);
             }

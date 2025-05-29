@@ -1,6 +1,7 @@
 #![allow(unused_variables)] // TODO(you): remove this lint after implementing this mod
 #![allow(dead_code)] // TODO(you): remove this lint after implementing this mod
 
+use bincode::{ Decode, Encode };
 use byteorder::{ LittleEndian, WriteBytesExt };
 use bytes::Bytes;
 use std::{ cmp::Ordering, fmt };
@@ -8,7 +9,8 @@ use std::{ cmp::Ordering, fmt };
 use std::io::Cursor;
 use byteorder::ReadBytesExt;
 
-use crate::catalog::schema::SchemaDataValue;
+use crate::catalog::schema::Schema;
+use crate::storage::tuple::Tuple;
 
 #[derive(Clone)]
 pub struct ByteBox {
@@ -247,13 +249,19 @@ impl fmt::Debug for ByteBox {
                     Err(_) => "Invalid UTF-8 string".to_string(),
                 }
 
-            DataType::Tuple(ref values) => {
-                let mut result = String::from("( ");
-                for val in values.iter() {
-                    result.push_str(", ");
+            DataType::Tuple(ref schema) => {
+                let Tuple::TupleData(values) = Tuple::decode(&schema, self.data.to_vec());
 
+                let mut result = String::from("( ");
+                for (mut idx, val) in values.iter().enumerate() {
                     use std::fmt::Write as _;
-                    write!(&mut result, "{}: {:?}", val.name, val.data).ok();
+                    write!(&mut result, " '{}' : {:?}", val.name, val.data).ok();
+
+                    idx += 1;
+
+                    if idx == values.len() - 1 {
+                        result.push_str(",  ");
+                    }
                 }
                 result.push_str(" )");
                 result
@@ -261,6 +269,14 @@ impl fmt::Debug for ByteBox {
 
             DataType::None => { "None".to_string() }
         };
+
+        match self.datatype {
+            DataType::Tuple(_) => {
+                return write!(f, "Tuple {{ {} }}", value_str);
+            }
+
+            _ => {}
+        }
 
         write!(
             f,
@@ -273,7 +289,7 @@ impl fmt::Debug for ByteBox {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, Encode, Decode, PartialEq, Eq, PartialOrd, Ord)]
 pub enum DataType {
     BigInt,
     Int,
@@ -283,7 +299,7 @@ pub enum DataType {
     Varchar(usize),
     Boolean,
 
-    Tuple(Vec<SchemaDataValue>),
+    Tuple(Schema),
 
     None,
 }
@@ -300,7 +316,7 @@ impl DataType {
                 DataType::Varchar(_) => "VARCHAR",
                 DataType::Boolean => "BOOLEAN",
                 DataType::None => "UNINITIALIZED",
-                DataType::Tuple(_) => "TUPLE",
+                DataType::Tuple(schema) => "TUPLE",
             }
         ).to_string()
     }
