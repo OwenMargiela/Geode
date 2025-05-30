@@ -11,8 +11,14 @@ manager provides us with the unique benefit of having the database engine gain t
 page management. The DBMS almost always wants to control things itself and can do a better job than the OS:
 
 
-1. Flushing dirty pages to disk in the correct order.
-2. Better buffer replacement policies.
-3. Specialized fetching algorithms to optimize query execution.
+* Flushing dirty pages to disk in the correct order.
+* Better buffer replacement policies.
+* Specialized fetching algorithms to optimize query execution.
 
 This is a thread-safe implementation of a buffer pool. Perfect for sharing between several processes at once
+
+## Flusher
+
+The Flusher object wraps around an instance of the buffer pool manager. Its main purpose is to logically 
+implement the crabbing/ coupling algorithm for index concurrency control. Future implementation may
+do away with such a large grain locking mechanism.
