@@ -42,8 +42,8 @@ A must-read for anyone looking to make a database.
 - 🌐 [CMU 15-445 Intro to Database Systems](https://15445.courses.cs.cmu.edu/fall2024/) (A. Pavlo, 2024)  
 - 🎥 [YouTube Lecture Series](https://www.youtube.com/watch?v=otE2WvX3XdQ&list=PLSE8ODhjZXjYDBpQnSymaectKjxCy6BYq&index=1)
 
-Mini-LSM introduced me to so many Rust coding conventions that I hope will eventually become second nature to me.  
-(Also, I'm most likely going to copy their transaction and WAL system.)
+Mini-LSM introduced me to so many Rust coding conventions that I hope will eventually become second nature to
+me.  (Also, I'm most likely going to copy their transaction and WAL system.)
 
 - 🌐 [Building an LSM in a Week](https://skyzh.github.io/mini-lsm/) (Alex Chi Z, 2023–2025)
 
