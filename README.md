@@ -49,4 +49,9 @@ Mini-LSM introduced me to so many Rust coding conventions that I hope will event
 
 ---
 
+⚠️ Project Status: This project has not yet reached the stage of a Minimum Viable Product (MVP).
+
+While the core components — including the buffer pool, B+Tree index, and asynchronous I/O — are functional, the engine 
+lacks the higher-level scaffolding needed to integrate these parts into a complete system. Development is actively ongoing.
+
 Databases are pretty cool. I wouldn't mind if I made them for the rest of my life >_<.
