@@ -54,4 +54,3 @@ me.  (Also, I'm most likely going to copy their transaction and WAL system.)
 While the core components — including the buffer pool, B+Tree index, and asynchronous I/O — are functional, the engine 
 lacks the higher-level scaffolding needed to integrate these parts into a complete system. Development is actively ongoing.
 
-Databases are pretty cool. I wouldn't mind if I made them for the rest of my life >_<.
