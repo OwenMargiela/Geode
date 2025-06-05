@@ -28,7 +28,7 @@ I'm open to any and all criticism. Donâ€™t be afraid to rip my code to shreds â€
 
 * [ ] Write-ahead logging and crash recovery  
 * [ ] MVCC transactions to replace coarse-grained locking strategies  
-* [ ] Geode DB over SQL
+* [ ] SQL support
 
 ---
 
